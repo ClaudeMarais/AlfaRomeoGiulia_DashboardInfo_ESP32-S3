@@ -1,0 +1,2 @@
+# AlfaRomeoGiulia_DashboardInfo_ESP32-S3
+ An Arduino project to display useful information like turbo boost pressure, current gear, performance tune status, etc., directly on the dashboard of an Alfa Romeo Giulia. The information is displayed in the location on the instrument cluster where the infotainment information is normally displayed, e.g. displaying the radio station name. An ESP32-S3 with SN65HVD230 and MCP2515 are used to communicate on two CAN busses simultaneously.
