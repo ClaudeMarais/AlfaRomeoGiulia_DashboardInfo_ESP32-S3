@@ -2,6 +2,8 @@
  
 An Arduino project to display useful information like turbo boost pressure, current gear, performance tune status, etc., directly on the dashboard of an Alfa Romeo Giulia. The information is displayed in the location on the instrument cluster where the infotainment information is normally displayed, e.g. displaying the radio station name.
 
+A big thank you to the Alfisti community for reverse enginering some of these PIDs, especially Gaucho https://github.com/gaucho1978/BACCAble
+
 
 | Example Message                   | Description                                                                                                        |
 |-----------------------------------|--------------------------------------------------------------------------------------------------------------------|
@@ -19,8 +21,6 @@ The OBD2 connector has an always-on 12V pin where the device will be powered fro
 NOTE: It's fun to tinker with your car, but there is always a chance to mess things up. I won't be liable if for some reason you damage your car.
 
 NOTE: The CAN IDs and PIDs used in this project specifically work with a 2019 Alfa Romeo Giulia 2.0L (Petrol). It's highly unlikely that the same PIDs will work with another car, you'll have to research what PIDs work with your own car.
-
-A big thank you to the Alfisti community for reverse enginering some of these PIDs, especially Gaucho https://github.com/gaucho1978/BACCAble
 
 Some tips:
 
