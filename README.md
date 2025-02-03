@@ -41,6 +41,14 @@ Arduino libraries used:
  - ESP32-TWAI-CAN: https://github.com/handmade0octopus/ESP32-TWAI-CAN
  - MCP2515: https://github.com/codeljo/AA_MCP2515
 
+If you are unfamiliar with Arduino, it’s pretty simple and there is a multitude of small tutorials on the internet. At a high level, you will need to:
+-	Install the Arduino IDE - https://www.arduino.cc/en/software
+-	Configure Arduino IDE for ESP32 - https://randomnerdtutorials.com/installing-esp32-arduino-ide-2-0/
+-	Install the two libraries mentioned above - https://docs.arduino.cc/software/ide-v1/tutorials/installing-libraries/
+-	Try out the most simple ESP32-S3 app to switch on its onboard LED - https://youtu.be/JlnV3U3Rx7k?si=xF3rMG3LD-cYAaQe
+-	Perhaps first try out my simple test that writes out car information to your PC - https://github.com/ClaudeMarais/Simple_OBD2_for_AlfaRomeoGiulia
+
+
 ![Intro](https://github.com/ClaudeMarais/AlfaRomeoGiulia_DashboardInfo_ESP32-S3/blob/main/Images/Intro.jpg?raw=true)
 
 --------------------------------
@@ -74,6 +82,8 @@ Some example messages:
 ![Components](https://github.com/ClaudeMarais/AlfaRomeoGiulia_DashboardInfo_ESP32-S3/blob/main/Images/Components.jpg?raw=true)
 
 --------------------------------
+
+NOTE: I opened up two different OBD2 cables and both had the same color coded thin wires, e.g. the yellow wire is connected to pin 11. But, it might be good to check if your wires are color coded the same way using a multimeter. This video might be helpful: https://youtu.be/-5xS5c7USjE?si=0HzdZcqJ7PLiXYwY
 
 ![OBD2_Pins](https://github.com/ClaudeMarais/AlfaRomeoGiulia_DashboardInfo_ESP32-S3/blob/main/Images/OBD2_Pins.jpg?raw=true)
 
