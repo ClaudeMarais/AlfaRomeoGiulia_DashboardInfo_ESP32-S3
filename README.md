@@ -108,5 +108,6 @@ NOTE: I opened up two different OBD2 cables and both had the same color coded th
 ![TerminationResistors](https://github.com/ClaudeMarais/AlfaRomeoGiulia_DashboardInfo_ESP32-S3/blob/main/Images/TerminationResistors.jpg?raw=true)
 
 --------------------------------
+This isn't required, but I wanted to make the footprint of the device smaller, so I cut off some pieces on the SN65HVD230 and MCP2515.
 
 ![CutSmaller](https://github.com/ClaudeMarais/AlfaRomeoGiulia_DashboardInfo_ESP32-S3/blob/main/Images/CutSmaller.jpg?raw=true)
