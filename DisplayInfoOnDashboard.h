@@ -102,15 +102,15 @@ void SetDashboardTextCharacters(uint8_t numFrames, uint8_t currentFrame, char* t
 
   uint8_t canData[8] = { 0 };
 
-  // Num frames - 1, byte[0] bit[3..7]
-  canData[0] = (canData[0] & ~0xF8) | ((indexOfLastFrame << 3) & 0xF8);
+  // Num frames - 1, byte[0] bit[7..3]
+  canData[0] = (indexOfLastFrame << 3) & 0b11111000;
 
-  // Current frame, byte[0] bit[0..2] and byte[1] bit[6..7]
-  canData[0] = (canData[0] & ~0x07) | ((currentFrame >> 2) & 0x07);
-  canData[1] = (canData[1] & ~0xC0) | ((currentFrame << 6) & 0xC0);
+  // InfoCode, byte[1] bit[5..0]
+  canData[1] = infoCode & 0b00111111;
 
-  // InfoCode, byte[1] bit[0..5]
-  canData[1] = (canData[1] & ~0x3F) | (infoCode & 0x3F);
+  // Current frame, byte[0] bit[2..0] and byte[1] bit[7..6]
+  canData[0] |= (currentFrame >> 2) & 0b00000111;
+  canData[1] |= (currentFrame << 6) & 0b11000000;
 
   // 3 UTF characters, byte[2..3], byte[4..5], byte[6..7]
   for (int i = 0; i < NumUTFCharsPerFrame; i++)
@@ -127,8 +127,6 @@ void SetDashboardTextCharacters(uint8_t numFrames, uint8_t currentFrame, char* t
 // Send multiple CAN frames to display all the text
 void SetDashboardText(char* text, uint32_t timeToDisplayText)
 {
-  ClearDashboardText();
-  
   for (int currentFrame = 0; currentFrame < NumFramesToDisplayText; currentFrame++)
   {
     uint8_t characterStartPosition = currentFrame * NumUTFCharsPerFrame;
