@@ -7,7 +7,8 @@ A big thank you to the Alfisti community for reverse enginering some of these PI
 
 | Example Message                   | Description                                                                                                        |
 |-----------------------------------|--------------------------------------------------------------------------------------------------------------------|
-| 23 psi &nbsp; D2 &nbsp; Oil 200*F | While driving, show turbo boost pressure, current gear and oil temp                                                |
+| 23 psi &nbsp; D2 &nbsp; Eng 200*F | While driving, show turbo boost pressure, current gear and engine temp                                             |
+| 23 psi &nbsp; D2 &nbsp; Oil 200*F | While driving, show turbo boost pressure, current gear and engine oil temp                                         |
 | 23 psi &nbsp; D2 &nbsp; Bat 12.6V | While driving, show turbo boost pressure, current gear and battery voltage                                         |
 | 23 psi &nbsp; D2 &nbsp; Squadra   | If in Dynamic drive mode and oil temp is above 70*C, the Squadra performance tune is fully enabled                 |
 | Max 23 psi @ 5200 rpm D2          | When car is just idling, e.g. at red traffic light, show interesting information when max turbo boost was measured |

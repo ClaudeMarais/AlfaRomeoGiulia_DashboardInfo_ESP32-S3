@@ -126,6 +126,10 @@ bool CarIgnitionOn()
 // Wait for car to turn on
 void WaitForCarToTurnOn()
 {
+  #ifdef DISABLE_POWER_SAVING_CHECKS
+  return;
+  #endif
+
   DebugPrintln("Waiting for car to turn on");
 
   timerWaitBeforeGoingIntoDeepSleep.Start();
@@ -153,6 +157,10 @@ void WaitForCarToTurnOn()
 // An OBD2 PID is used to determine the car's Ignition Key Position
 void CheckIfCarIsStillOn()
 {
+  #ifdef DISABLE_POWER_SAVING_CHECKS
+  return;
+  #endif
+
   timerWaitBeforeGoingIntoDeepSleep.Start();
 
   if (!CarIgnitionOn())

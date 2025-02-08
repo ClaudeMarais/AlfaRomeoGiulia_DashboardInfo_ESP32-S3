@@ -10,6 +10,7 @@
 
 // Define our OBD2 PIDs for Alfa Romeo Giulia
 PID PIDs[] = { { "Boost Pressure",        CarModule::ECM, OBD2Service::ManufacturerSpecific, 0x195a, &CalcBoostPressure,        PrintBoostPressure },
+               { "Engine Temp",           CarModule::ECM, OBD2Service::ManufacturerSpecific, 0x1003, &CalcEngineTemp,           PrintEngineTemp } ,
                { "Engine Oil Temp",       CarModule::ECM, OBD2Service::ManufacturerSpecific, 0x1302, &CalcEngineOilTemp,        PrintEngineOilTemp },
                { "Atmospheric Pressure",  CarModule::ECM, OBD2Service::ManufacturerSpecific, 0x1956, &CalcAtmosphericPressure,  PrintAtmosphericPressure },
                { "Ignition Key Position", CarModule::BCM, OBD2Service::ManufacturerSpecific, 0x0131, &CalcIgnitionKeyPosition,  PrintIgnitionKeyPosition },
@@ -19,6 +20,7 @@ PID PIDs[] = { { "Boost Pressure",        CarModule::ECM, OBD2Service::Manufactu
 enum PIDIndex
 {
   BoostPressure,
+  EngineTemp,
   EngineOilTemp,
   AtmosphericPressure,
   IgnitionKeyPosition,
@@ -27,6 +29,7 @@ enum PIDIndex
 };
 
 PID* pBoostPressure       = &PIDs[PIDIndex::BoostPressure];
+PID* pEngineTemp          = &PIDs[PIDIndex::EngineTemp];
 PID* pEngineOilTemp       = &PIDs[PIDIndex::EngineOilTemp];
 PID* pAtmosphericPressure = &PIDs[PIDIndex::AtmosphericPressure];
 PID* pIgnitionKeyPosition = &PIDs[PIDIndex::IgnitionKeyPosition];
@@ -100,6 +103,7 @@ void SendOBD2Requests()
   if (timerVeryLowFrequency.RanOut())
   {
     timerVeryLowFrequency.Start();
+    SendOBD2Request(pEngineTemp);
     SendOBD2Request(pEngineOilTemp);
     SendOBD2Request(pAtmosphericPressure);
     SendOBD2Request(pBattery);
@@ -161,6 +165,7 @@ void ProcessReceivedCANFrames()
   xSemaphoreTake(g_SemaphoreCarData, portMAX_DELAY);
   g_CurrentCarData.Gear = g_Gear;
   g_CurrentCarData.EngineRPM = g_EngineRPM;
+  g_CurrentCarData.EngineTemp = g_EngineTemp;
   g_CurrentCarData.EngineOilTemp = g_EngineOilTemp;
   g_CurrentCarData.AtmosphericPressure = g_AtmosphericPressure;
   g_CurrentCarData.BoostPressure = g_BoostPressure;

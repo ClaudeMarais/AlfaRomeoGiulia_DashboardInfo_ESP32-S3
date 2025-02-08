@@ -14,6 +14,7 @@ struct CarData
 {
   int32_t EngineRPM;
   int32_t Gear;
+  int32_t EngineTemp;
   int32_t EngineOilTemp;
   int32_t AtmosphericPressure;
   int32_t BoostPressure;        // Absolute boost pressure from the sensor

@@ -5,6 +5,7 @@
 
 #include "AA_MCP2515.h"
 #include "AsyncTimer.h"
+#include "Version.h"
 
 // CAN frames include 8 bytes of data. We have a total of 24 characters on the dashboard, therefore the characters will be sent
 // using multiple CAN frames. The data for this specific CAN ID uses the first two bytes to encode the total number of frames
@@ -26,17 +27,22 @@ const uint32_t DelayTimeBetweenFrames = TimeToDisplayText / NumFramesToDisplayTe
 
 enum InfoToDisplay
 {
-  infoCurrentInfoWithOil,       // While driving, show turbo boost pressure, current gear and engine oil temperature
-  infoCurrentInfoWithBattery,   // While driving, show turbo boost pressure, current gear and battery voltage
-  infoCurrentInfoWithSquadra,   // While driving, show turbo boost pressure, current gear and that Squadra performance tune is enabled
-  infoMaxBoost,                 // When car is idling, show information about when maximum turbo boost was obtained
-  infoWarningLowBattery,        // When car is idling, show warning when car battery is low
-  infoWarningColdEngine         // Don't drive too hard when engine is cold. This warning isn't for me, but for my son when he's driving my car :-)
+  infoCurrentInfoWithEngineTemp,    // While driving, show turbo boost pressure, current gear and engine temperature
+  infoCurrentInfoWithEngineOilTemp, // While driving, show turbo boost pressure, current gear and engine oil temperature
+  infoCurrentInfoWithBattery,       // While driving, show turbo boost pressure, current gear and battery voltage
+  infoCurrentInfoWithSquadra,       // While driving, show turbo boost pressure, current gear and that Squadra performance tune is enabled
+  infoMaxBoost,                     // When car is idling, show information about when maximum turbo boost was obtained
+  infoWarningLowBattery,            // When car is idling, show warning when car battery is low
+  infoWarningColdEngine             // Don't drive too hard when engine is cold. This warning isn't for me, but for my son when he's driving my car :-)
 };
 
+AsyncTimer timerShowNameAndVersion(10000);            // When car is turned on, show name and version for 10 seconds
 AsyncTimer timerWaitBeforeShowingInfoWhileIdle(2000); // Some info show only when car is at ~idle. We don't want to immediately show those, but rather wait 2 seconds
-AsyncTimer timerSwitchBetweenOilAndBattery(5000);     // Every 5 seconds switch between showing oil temp and battery V
-bool bShowOilWithCurrentInfo = true;
+AsyncTimer timerToggleCurrentInfo(6000);              // Every 6 seconds toggle info like engine temp, engine oil temp, battery V, etc.
+
+// Every 6 seconds, toggle from infoCurrentInfoWithEngineTemp .. infoCurrentInfoWithBattery
+uint8_t currentInfoIndex = infoCurrentInfoWithEngineTemp;
+uint8_t maxCurrentInfoIndex = infoCurrentInfoWithBattery;
 
 // g_CurrentCarData is populated by the SN65HVD230 transceiver on another ESP32-S3 core. Since the data needs to be thread safe, we keep a
 // local copy of the data on this thread, copying it safely using g_SemaphoreCarData
@@ -153,7 +159,25 @@ void GenerateGearText(int32_t gear, char* gearText)
 // Given the current car data, generate the full text to be displayed
 void GenerateText(char* text)
 {
-  InfoToDisplay infoToDisplay = infoCurrentInfoWithOil;
+  if (!timerShowNameAndVersion.RanOut())
+  {
+    sprintf(text, "    %s   v%1.1f", g_ProjectName, g_Version);
+    return;
+  }
+
+  if (timerToggleCurrentInfo.RanOut())
+  {
+    currentInfoIndex++;
+    if (currentInfoIndex > maxCurrentInfoIndex)
+    {
+      currentInfoIndex = 0;
+    }
+
+    timerToggleCurrentInfo.Start();
+  }
+
+
+  InfoToDisplay infoToDisplay = infoCurrentInfoWithEngineTemp;
 
   char gearText[8] = { 0 };
 
@@ -173,13 +197,7 @@ void GenerateText(char* text)
     }
     else
     {
-      if (timerSwitchBetweenOilAndBattery.RanOut())
-      {
-        bShowOilWithCurrentInfo = !bShowOilWithCurrentInfo;
-        timerSwitchBetweenOilAndBattery.Start();
-      }
-
-      infoToDisplay = bShowOilWithCurrentInfo ? InfoToDisplay::infoCurrentInfoWithOil : InfoToDisplay::infoCurrentInfoWithBattery;
+      infoToDisplay = (InfoToDisplay)currentInfoIndex;
     }
   }
 
@@ -223,7 +241,16 @@ void GenerateText(char* text)
 
   switch (infoToDisplay)
   {    
-    case InfoToDisplay::infoCurrentInfoWithOil:
+    case InfoToDisplay::infoCurrentInfoWithEngineTemp:
+    {
+      // Example:   " 23 psi   D1   Eng 200*F"
+      GenerateGearText(carData.Gear, gearText); // Current gear
+      float farh = (carData.EngineTemp * 9.5f / 5.0f) + 32.0f;
+      sprintf(text, " %2d psi   %s   Eng %3d*F", int32_t(turboBoostPsi + 0.5f), gearText, int32_t(farh + 0.5f));
+      break;
+    }
+
+    case InfoToDisplay::infoCurrentInfoWithEngineOilTemp:
     {
       // Example:   " 23 psi   D1   Oil 200*F"
       GenerateGearText(carData.Gear, gearText); // Current gear
@@ -282,7 +309,7 @@ void DisplayInfoOnDashboard(void* params)
 {
   DebugPrintf("Core %d: DisplayInfoOnDashboard()\n", xPortGetCoreID());
 
-  timerSwitchBetweenOilAndBattery.Start();
+  timerToggleCurrentInfo.Start();
 
   // Just for safety, we make the text twice as long as we realy need
   char text[NumCharsInText * 2] = "Initializing .....";
@@ -322,6 +349,7 @@ void DisplayInfoOnDashboard(void* params)
     }
     else
     {
+      timerShowNameAndVersion.Start();
       delay(TimeToDisplayText);
     }
   }

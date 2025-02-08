@@ -96,6 +96,25 @@ void PrintGear()
 }
 
 // --------------------------------------------------------
+// ******** Engine Temperature ****************************
+// --------------------------------------------------------
+
+static int32_t g_EngineTemp = 0;    // Celcius
+
+int32_t CalcEngineTemp(const uint8_t* pData)
+{
+  uint8_t A = pData[4];
+  g_EngineTemp = A - 40;
+  return g_EngineTemp;
+}
+
+void PrintEngineTemp()
+{
+  int32_t Farh = (float(g_EngineTemp) * 9.0f / 5.0f) + 32.0f + 0.5f;
+  Serial.printf("Engine Temperature = %d C (%d F)\n", g_EngineTemp, Farh);
+}
+
+// --------------------------------------------------------
 // ******** Engine Oil Temperature ************************
 // --------------------------------------------------------
 

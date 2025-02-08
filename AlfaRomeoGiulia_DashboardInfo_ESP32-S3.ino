@@ -7,7 +7,8 @@
 // |-----------------------------|--------------------------------------------------------------------------------------------------------------------|
 // | Message                     | Description                                                                                                        |
 // |-----------------------------|--------------------------------------------------------------------------------------------------------------------|
-// | 23 psi  D2  Oil 200*F       | While driving, show turbo boost pressure, current gear and oil temp                                                |
+// | 23 psi  D2  Eng 200*F       | While driving, show turbo boost pressure, current gear and engine temp                                             |
+// | 23 psi  D2  Oil 200*F       | While driving, show turbo boost pressure, current gear and engine oil temp                                         |
 // | 23 psi  D2  Bat 12.6V       | While driving, show turbo boost pressure, current gear and battery voltage                                         |
 // | 23 psi  D2  Squadra         | If in Dynamic drive mode and oil temp is above 70*C, the Squadra performance tune is fully enabled                 |
 // | Max 23 psi @ 5200 rpm D2    | When car is just idling, e.g. at red traffic light, show interesting information when max turbo boost was measured |
@@ -48,8 +49,13 @@
 //    ESP32-TWAI-CAN: https://github.com/handmade0octopus/ESP32-TWAI-CAN
 //    MCP2515: https://github.com/codeljo/AA_MCP2515
 
+// The final build should have this commented out
 // When this is defined, Serial output will happen, otherwise not
 //#define DEBUG 1
+
+// The final build should have this commented out
+// It's sometimes easier to debug without the device going into sleep mode regularly
+//#define DISABLE_POWER_SAVING_CHECKS 1
 
 #include "Shared.h"
 #include "AsyncTimer.h"
