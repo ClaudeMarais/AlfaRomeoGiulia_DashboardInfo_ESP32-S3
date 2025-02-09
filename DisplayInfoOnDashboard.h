@@ -102,9 +102,27 @@ void ClearDashboardText()
 // Send one CAN frame to set three of the UTF characters in the text
 void SetDashboardTextCharacters(uint8_t numFrames, uint8_t currentFrame, char* text)
 {
-  const uint8_t infoCode = 0x00;
+  // The dashboard messages can be group by Radio, Media, Bluetooth, Phone and Navigation. It looks like some groups have higher
+  // priority than others when it comes to showing something on the dashboard. For example, when using the Radio FM channel for
+  // custom messages, sometimes the Radio FM will send its own messages and cause the custom message to flicker. But, if you listen
+  // to Radio AM and you use Radio FM for custom messages, then there is no flickering, until you listen to AM. It's similar to groups,
+  // e.g. Phone messages seem to be higher priority than Radio messages, therefore Radio messages won't interfere with Phone messages
+  // or Navigation messages. Below are some message "infoCode" values which I identified. I chose to use the Media Center USB channel,
+  // since I never use USB and there is no radio text interference when using this channel. Unfortunately, it does show a small USB icon
+  // next to the custom text, but I can get used to the icon, I don't know that I can get used to some flickering.
+
+  // 0x00 - ?         - Occasional short flicker from radio station info interfering with custom text
+  // 0x02 - FM radio  - Occasional short flicker from radio station info interfering with custom text
+  // 0x03 - AM radio  - Occasional short flicker from radio station info interfering with custom text
+  // 0x05 - Aux       - Occasional long flicker from radio station info interfering with custom text
+  // 0x06 - USB left  - No flicker, but shows USB icon
+  // 0x07 - USB right - No flicker, but shows USB icon
+  // 0x08 - USB front - No flicker, but shows USB icon
+  // 0x09 - Bluetooth - Occasional long flicker from radio station info interfering with custom text
+
+  const uint8_t infoCode = 0x08;        // No flickering, we'll just accept that it shows a USB icon
   const uint8_t indexOfLastFrame = numFrames - 1;
-  const uint8_t utfCharStartIndex = 2; // First UTF character is in canData[2]
+  const uint8_t utfCharStartIndex = 2;  // First UTF character is in canData[2]
 
   uint8_t canData[8] = { 0 };
 
@@ -175,7 +193,6 @@ void GenerateText(char* text)
 
     timerToggleCurrentInfo.Start();
   }
-
 
   InfoToDisplay infoToDisplay = infoCurrentInfoWithEngineTemp;
 
