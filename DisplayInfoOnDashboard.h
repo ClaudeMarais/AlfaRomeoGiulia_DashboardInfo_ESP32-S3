@@ -199,12 +199,15 @@ void GenerateText(char* text)
   char gearText[8] = { 0 };
 
   // Choose what info to show while driving
+
+#ifdef SHOW_SQUADRA_MESSAGE
   if (carData.DriveMode == DNASelector::D &&                // Squadra tune is only enabled in Dynamic drive mode
       carData.EngineOilTemp >= SquadraSafeOilTemperature)   // and only fully enabled when engine oil reaches 70*C (158*F)
   {
     infoToDisplay = InfoToDisplay::infoCurrentInfoWithSquadra;
   }
   else
+#endif
   {
     if (carData.EngineOilTemp < SquadraSafeOilTemperature &&
         carData.EngineRPM > ColdEngineSafeRPM)

@@ -57,6 +57,10 @@
 // It's sometimes easier to debug without the device going into sleep mode regularly
 //#define DISABLE_POWER_SAVING_CHECKS 1
 
+// This define allows you to see a custom message when the Squadra performance tune is fully active
+// If you don't have the Squadra tune, comment this out
+#define SHOW_SQUADRA_MESSAGE 1
+
 #include "Shared.h"
 #include "AsyncTimer.h"
 #include "CollectCarData.h"
