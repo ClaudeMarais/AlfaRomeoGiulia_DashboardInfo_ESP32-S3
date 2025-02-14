@@ -15,15 +15,15 @@ const uint8_t NumCharsInText = 24;
 const uint8_t NumUTFCharsPerFrame = 3;
 const uint8_t NumFramesToDisplayText = NumCharsInText / NumUTFCharsPerFrame;
 
-// There is an interesting problem to know how frequently CAN frames with the updated information should be sent. If it's too slow,
-// then the original text from the infotainment system will briefly overwrite our custom text and the text will flicker. If our
-// information includes something like boost pressure that changes very quickly, we want to update the data quickly enough to not see
-// outdated information, e.g. don't take half a second to show the current boost pressure. But, we can't do it too quickly, since this is
-// on the low speed CAN bus, and we should probably not constantly spam the bus with our own custom frames. I settled on seeing full updated
-// information 5 times a second. Since we need 8 CAN frames to update all the information in 200ms, we need to send one CAN frame every 25ms
-// This doesn't completely fix the problem, but it's infrequent enough that it doesn't bother me.
-const uint32_t TimeToDisplayText = 200;
+// Update information 4 times a second. Since we need 8 CAN frames to update all the information in 250ms, we need to send one CAN frame every 31ms
+const uint32_t TimeToDisplayText = 1000 / 4;
 const uint32_t DelayTimeBetweenFrames = TimeToDisplayText / NumFramesToDisplayText;
+
+// Keep track of whenever a CAN frame is observed that was sent to display text on the dashboard. For example, the radio can sometimes send
+// information about what's playing on the radio, e.g. every 2.5 seconds. These frames will interfere with the sequence of custom frames we
+// want to send ourselves, resulting in either flickering of text or the display freezing for a few seconds. By knowing when such frames are
+// sent, we can reset the sending of our frames.
+volatile bool bIncomingRadioFrame = false;
 
 enum InfoToDisplay
 {
@@ -38,9 +38,9 @@ enum InfoToDisplay
 
 AsyncTimer timerShowNameAndVersion(10000);            // When car is turned on, show name and version for 10 seconds
 AsyncTimer timerWaitBeforeShowingInfoWhileIdle(2000); // Some info show only when car is at ~idle. We don't want to immediately show those, but rather wait 2 seconds
-AsyncTimer timerToggleCurrentInfo(6000);              // Every 6 seconds toggle info like engine temp, engine oil temp, battery V, etc.
+AsyncTimer timerToggleCurrentInfo(2000);              // Every 2 seconds toggle info like engine temp, engine oil temp, battery V, etc.
 
-// Every 6 seconds, toggle from infoCurrentInfoWithEngineTemp .. infoCurrentInfoWithBattery
+// Every 2 seconds, toggle from infoCurrentInfoWithEngineTemp .. infoCurrentInfoWithBattery
 uint8_t currentInfoIndex = infoCurrentInfoWithEngineTemp;
 uint8_t maxCurrentInfoIndex = infoCurrentInfoWithBattery;
 
@@ -66,16 +66,36 @@ const int8_t CAN_PIN_INT = D6;
 CANConfig config(CAN_BITRATE, CAN_PIN_CS, CAN_PIN_INT);
 CANController CAN(config);
 
+// Interrupt service routine that will get called whenever a frame with a CAN ID for the dashboard is observed
+void OnReceive(CANController&, CANFrame frame)
+{
+  bIncomingRadioFrame = true;
+}
+
 // This will be called from the main setup() function, which will get called each time the device wakes up from deep sleep
 void SetupDisplayInfoOnDashboard()
 {
   DebugPrintln("SetupDisplayInfoOnDashboard()");
 
-  while (CAN.begin(CANController::Mode::Normal) != CANController::OK)
+  while (CAN.begin(CANController::Mode::Config) != CANController::OK)
   {
     DebugPrintln("MCP2515 CAN controller failed");
     delay(1000);
   }
+
+  // We're only interested in observing frames from the CAN ID that contains info for the dashboard. Therefore, we setup a mask and filter
+  // so that all other frames are filtered out by the hardware, i.e. no need to filter it out in the OnReceive function using if-statements
+  // This is an 11-bit CAN ID so the mask is 0b011111111111
+  CAN.setFiltersRxb0(DashboardText, 0x00, 0b011111111111, false);
+  CAN.setFiltersRxb1(0x00, 0x00, 0x00, 0x00, 0b011111111111, false);
+  CAN.setFilters(true);
+
+  CAN.setMode(CANController::Mode::Normal);
+
+  // Using an interrupt to notify us when a new frame from the radio was received is great, since you can immediately respond to it when that frame
+  // is observed. Unfortunately using the interrupt sometimes reboots the device. Not sure if it's something specific with the MCP2515 I'm using.
+  // Instead of using an interrupt, we'll just manually read frames.
+  //CAN.setInterruptCallbacks(&OnReceive, nullptr);
 
   DebugPrintln("MCP2515 CAN controller initialized");
 }
@@ -115,12 +135,12 @@ void SetDashboardTextCharacters(uint8_t numFrames, uint8_t currentFrame, char* t
   // 0x02 - FM radio  - Occasional short flicker from radio station info interfering with custom text
   // 0x03 - AM radio  - Occasional short flicker from radio station info interfering with custom text
   // 0x05 - Aux       - Occasional long flicker from radio station info interfering with custom text
-  // 0x06 - USB left  - No flicker, but shows USB icon
-  // 0x07 - USB right - No flicker, but shows USB icon
-  // 0x08 - USB front - No flicker, but shows USB icon
+  // 0x06 - USB left  - No flicker, but shows USB icon and sometimes display freezes for a few seconds
+  // 0x07 - USB right - No flicker, but shows USB icon and sometimes display freezes for a few seconds
+  // 0x08 - USB front - No flicker, but shows USB icon and sometimes display freezes for a few seconds
   // 0x09 - Bluetooth - Occasional long flicker from radio station info interfering with custom text
 
-  const uint8_t infoCode = 0x08;        // No flickering, we'll just accept that it shows a USB icon
+  const uint8_t infoCode = 0x05;
   const uint8_t indexOfLastFrame = numFrames - 1;
   const uint8_t utfCharStartIndex = 2;  // First UTF character is in canData[2]
 
@@ -148,6 +168,8 @@ void SetDashboardTextCharacters(uint8_t numFrames, uint8_t currentFrame, char* t
   SendCANMessage(CAN_Id::DashboardText, canData);
 }
 
+CANFrame rxFrame;
+
 // Send multiple CAN frames to display all the text
 void SetDashboardText(char* text, uint32_t timeToDisplayText)
 {
@@ -155,7 +177,28 @@ void SetDashboardText(char* text, uint32_t timeToDisplayText)
   {
     uint8_t characterStartPosition = currentFrame * NumUTFCharsPerFrame;
     SetDashboardTextCharacters(NumFramesToDisplayText, currentFrame, text + characterStartPosition);
-    delay(DelayTimeBetweenFrames);
+
+    // If a frame from the radio was observed while we're in the loop of sending our own custom frames, then restart the loop and resend from the first frame
+    if (CAN.read(rxFrame) == CANController::IOResult::OK)
+    {
+      currentFrame = 0;
+      continue;
+    }
+
+    // At this point we could wait the full DelayTimeBetweenFrames time before sending the next frame, but it's better to wait only half the time and do a quick
+    // check to see if a radio frame came in, so that we can respond a bit quicker to such a frame. This reduces the chance of radio frames interfering with our
+    // own custom frames.
+    delay(DelayTimeBetweenFrames / 2);
+
+    // Check again for a radio frame and restart the loop if a frame was observed
+    if (CAN.read(rxFrame) == CANController::IOResult::OK)
+    {
+      currentFrame = 0;
+      continue;
+    }
+
+    // If no radio frame was observed, we still need to wait out the other half of DelayTimeBetweenFrames time
+    delay(DelayTimeBetweenFrames / 2);
   }
 }
 
@@ -316,9 +359,6 @@ void GenerateText(char* text)
       sprintf(text, " Careful, engine is cold");
       break;
     }
-
-    default:
-      ClearDashboardText();
   }
 
   //DebugPrintln(text);

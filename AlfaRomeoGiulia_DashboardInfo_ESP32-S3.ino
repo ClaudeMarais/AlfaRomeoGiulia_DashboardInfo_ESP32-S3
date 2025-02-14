@@ -24,6 +24,13 @@
 // The ESP32-S3 has two cores, so it's convenient to continuously collect car data on one core from the high speed CAN bus, while at the same time send
 // information to the dashboard on the low speed CAN bus using the other ESP32-S3 core.
 //
+// NOTE: If you intend to experiment and make your own code changes, I recommend enabling the below define for DISABLE_POWER_SAVING_CHECKS. If not, the
+//       device will go into deep sleep and you might struggle to upload code to the device, since you have to time it just right. When the device is
+//       powered on by plugging it into the computer's USB port, you have 5 seconds before it goes into deep sleep. You want to have the device awake
+//       while the code is being uploaded. When using the Arduino IDE, I find that if you unplug the device from your computer's USB port, then wait for
+//       message in the Output window that says "Linking everything together...", and then quickly plug the device into your computer's USB port, it gives
+//       enough time for the device to stay awake to upload the code.
+//
 // NOTE: It's fun to tinker with your car, but there is always a chance to mess things up. I won't be liable if for some reason you damage your car.
 //
 // NOTE: The CAN IDs and PIDs used in this project specifically works with a 2019 Alfa Romeo Giulia 2.0L (Petrol).
