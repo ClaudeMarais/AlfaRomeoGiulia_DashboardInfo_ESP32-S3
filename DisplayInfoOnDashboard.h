@@ -15,8 +15,8 @@ const uint8_t NumCharsInText = 24;
 const uint8_t NumUTFCharsPerFrame = 3;
 const uint8_t NumFramesToDisplayText = NumCharsInText / NumUTFCharsPerFrame;
 
-// Update information 4 times a second. Since we need 8 CAN frames to update all the information in 250ms, we need to send one CAN frame every 31ms
-const uint32_t TimeToDisplayText = 1000 / 4;
+// Update information 5 times a second. Since we need 8 CAN frames to update all the information in 200ms, we need to send one CAN frame every 25ms
+const uint32_t TimeToDisplayText = 1000 / 5;
 const uint32_t DelayTimeBetweenFrames = TimeToDisplayText / NumFramesToDisplayText;
 
 // Keep track of whenever a CAN frame is observed that was sent to display text on the dashboard. For example, the radio can sometimes send
