@@ -38,7 +38,7 @@ enum InfoToDisplay
 
 AsyncTimer timerShowNameAndVersion(10000);            // When car is turned on, show name and version for 10 seconds
 AsyncTimer timerWaitBeforeShowingInfoWhileIdle(2000); // Some info show only when car is at ~idle. We don't want to immediately show those, but rather wait 2 seconds
-AsyncTimer timerToggleCurrentInfo(2000);              // Every 2 seconds toggle info like engine temp, engine oil temp, battery V, etc.
+AsyncTimer timerToggleCurrentInfo(3000);              // Every 3 seconds toggle info like engine temp, engine oil temp, battery V, etc.
 
 // Every 2 seconds, toggle from infoCurrentInfoWithEngineTemp .. infoCurrentInfoWithBattery
 uint8_t currentInfoIndex = infoCurrentInfoWithEngineTemp;
@@ -119,28 +119,28 @@ void ClearDashboardText()
   SendCANMessage(CAN_Id::DashboardText, canData);
 }
 
+// The dashboard messages can be group by Radio, Media, Bluetooth, Phone and Navigation. It looks like some groups have higher
+// priority than others when it comes to showing something on the dashboard. For example, when using the Radio FM channel for
+// custom messages, sometimes the Radio FM will send its own messages and cause the custom message to flicker. But, if you listen
+// to Radio AM and you use Radio FM for custom messages, then there is no flickering, until you listen to AM. It's similar to groups,
+// e.g. Phone messages seem to be higher priority than Radio messages, therefore Radio messages won't interfere with Phone messages
+// or Navigation messages. Below are some message "infoCode" values which I identified. I chose to use the Media Center USB channel,
+// since I never use USB and there is no radio text interference when using this channel. Unfortunately, it does show a small USB icon
+// next to the custom text, but I can get used to the icon, I don't know that I can get used to some flickering.
+
+// 0x00 - ?         - Occasional short flicker from radio station info interfering with custom text
+// 0x02 - FM radio  - Occasional short flicker from radio station info interfering with custom text
+// 0x03 - AM radio  - Occasional short flicker from radio station info interfering with custom text
+// 0x05 - Aux       - Occasional long flicker from radio station info interfering with custom text
+// 0x06 - USB left  - No flicker, but shows USB icon and sometimes display freezes for a few seconds
+// 0x07 - USB right - No flicker, but shows USB icon and sometimes display freezes for a few seconds
+// 0x08 - USB front - No flicker, but shows USB icon and sometimes display freezes for a few seconds
+// 0x09 - Bluetooth - Occasional long flicker from radio station info interfering with custom text
+const uint8_t InfoCode = 0x05;
+
 // Send one CAN frame to set three of the UTF characters in the text
 void SetDashboardTextCharacters(uint8_t numFrames, uint8_t currentFrame, char* text)
 {
-  // The dashboard messages can be group by Radio, Media, Bluetooth, Phone and Navigation. It looks like some groups have higher
-  // priority than others when it comes to showing something on the dashboard. For example, when using the Radio FM channel for
-  // custom messages, sometimes the Radio FM will send its own messages and cause the custom message to flicker. But, if you listen
-  // to Radio AM and you use Radio FM for custom messages, then there is no flickering, until you listen to AM. It's similar to groups,
-  // e.g. Phone messages seem to be higher priority than Radio messages, therefore Radio messages won't interfere with Phone messages
-  // or Navigation messages. Below are some message "infoCode" values which I identified. I chose to use the Media Center USB channel,
-  // since I never use USB and there is no radio text interference when using this channel. Unfortunately, it does show a small USB icon
-  // next to the custom text, but I can get used to the icon, I don't know that I can get used to some flickering.
-
-  // 0x00 - ?         - Occasional short flicker from radio station info interfering with custom text
-  // 0x02 - FM radio  - Occasional short flicker from radio station info interfering with custom text
-  // 0x03 - AM radio  - Occasional short flicker from radio station info interfering with custom text
-  // 0x05 - Aux       - Occasional long flicker from radio station info interfering with custom text
-  // 0x06 - USB left  - No flicker, but shows USB icon and sometimes display freezes for a few seconds
-  // 0x07 - USB right - No flicker, but shows USB icon and sometimes display freezes for a few seconds
-  // 0x08 - USB front - No flicker, but shows USB icon and sometimes display freezes for a few seconds
-  // 0x09 - Bluetooth - Occasional long flicker from radio station info interfering with custom text
-
-  const uint8_t infoCode = 0x05;
   const uint8_t indexOfLastFrame = numFrames - 1;
   const uint8_t utfCharStartIndex = 2;  // First UTF character is in canData[2]
 
@@ -150,7 +150,7 @@ void SetDashboardTextCharacters(uint8_t numFrames, uint8_t currentFrame, char* t
   canData[0] = (indexOfLastFrame << 3) & 0b11111000;
 
   // InfoCode, byte[1] bit[5..0]
-  canData[1] = infoCode & 0b00111111;
+  canData[1] = InfoCode & 0b00111111;
 
   // Current frame, byte[0] bit[2..0] and byte[1] bit[7..6]
   canData[0] |= (currentFrame >> 2) & 0b00000111;
@@ -168,37 +168,78 @@ void SetDashboardTextCharacters(uint8_t numFrames, uint8_t currentFrame, char* t
   SendCANMessage(CAN_Id::DashboardText, canData);
 }
 
+// Given a received radio frame, find the current frame
+uint8_t GetCurrentRadioFrame(uint8_t* pData)
+{
+  // Current frame, byte[0] bit[2..0] and byte[1] bit[7..6]
+  uint8_t highBits = (pData[0] & 0b00000111) << 2;
+  uint8_t lowBits = (pData[1] & 0b11000000) >> 6;
+  return highBits | lowBits;
+}
+
+// Given a received radio frame, find the total number of frames
+uint8_t GetNumRadioFrames(uint8_t* pData)
+{
+  // Num frames - 1, byte[0] bit[7..3]
+  return (pData[0] >> 3) + 1;
+}
+
+// Given a received radio frame, find the info code
+uint8_t GetRadioInfoCode(uint8_t* pData)
+{
+  // InfoCode, byte[1] bit[5..0]
+  return pData[1] & 0b00111111;
+}
+
 CANFrame rxFrame;
 
 // Send multiple CAN frames to display all the text
 void SetDashboardText(char* text, uint32_t timeToDisplayText)
 {
+  unsigned long delayTimeBetweenFrames = DelayTimeBetweenFrames;
+
   for (int currentFrame = 0; currentFrame < NumFramesToDisplayText; currentFrame++)
   {
     uint8_t characterStartPosition = currentFrame * NumUTFCharsPerFrame;
     SetDashboardTextCharacters(NumFramesToDisplayText, currentFrame, text + characterStartPosition);
-
-    // If a frame from the radio was observed while we're in the loop of sending our own custom frames, then restart the loop and resend from the first frame
-    if (CAN.read(rxFrame) == CANController::IOResult::OK)
+    delay(delayTimeBetweenFrames);
+   
+    // We don't care if a radio frame interrupts our custom text half way through the frame sequence
+    if (currentFrame < (NumFramesToDisplayText / 2))
     {
-      currentFrame = 0;
       continue;
     }
 
-    // At this point we could wait the full DelayTimeBetweenFrames time before sending the next frame, but it's better to wait only half the time and do a quick
-    // check to see if a radio frame came in, so that we can respond a bit quicker to such a frame. This reduces the chance of radio frames interfering with our
-    // own custom frames.
-    delay(DelayTimeBetweenFrames / 2);
-
-    // Check again for a radio frame and restart the loop if a frame was observed
+    // Check if there was a radio frame. Since we setup a hardware filter, we know that the only frames received
+    // would be from CAN_Id::DashboardText
     if (CAN.read(rxFrame) == CANController::IOResult::OK)
     {
-      currentFrame = 0;
-      continue;
-    }
+      uint8_t radioData[8];
+      rxFrame.getData(radioData, 8);
+      auto numRadioFrames = GetNumRadioFrames(radioData);
+      auto currentRadioFrame = GetCurrentRadioFrame(radioData);
+      auto radioInfoCode = GetRadioInfoCode(radioData);
 
-    // If no radio frame was observed, we still need to wait out the other half of DelayTimeBetweenFrames time
-    delay(DelayTimeBetweenFrames / 2);
+      if (radioInfoCode == InfoCode)
+      {
+        continue;
+      }
+
+      // Wait until we see the last radio frame and restart our custom frames
+      while (currentRadioFrame < (numRadioFrames - 1))
+      {
+        if (CAN.read(rxFrame) == CANController::IOResult::OK)
+        {
+          rxFrame.getData(radioData, 8);
+          numRadioFrames = GetNumFrames(radioData);
+          currentRadioFrame = GetCurrentFrame(radioData);
+        }
+      }
+
+      // Restart the loop and start displaying our custom frames from the start, and also shorten the delay time between custom frames
+      currentFrame = -1;
+      delayTimeBetweenFrames = DelayTimeBetweenFrames - 5;
+    }
   }
 }
 
