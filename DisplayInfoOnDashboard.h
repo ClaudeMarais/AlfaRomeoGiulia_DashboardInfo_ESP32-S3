@@ -231,8 +231,8 @@ void SetDashboardText(char* text, uint32_t timeToDisplayText)
         if (CAN.read(rxFrame) == CANController::IOResult::OK)
         {
           rxFrame.getData(radioData, 8);
-          numRadioFrames = GetNumFrames(radioData);
-          currentRadioFrame = GetCurrentFrame(radioData);
+          numRadioFrames = GetNumRadioFrames(radioData);
+          currentRadioFrame = GetCurrentRadioFrame(radioData);
         }
       }
 
