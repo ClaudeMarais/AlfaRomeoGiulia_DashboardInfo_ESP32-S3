@@ -110,8 +110,8 @@ int32_t CalcEngineTemp(const uint8_t* pData)
 
 void PrintEngineTemp()
 {
-  int32_t Farh = (float(g_EngineTemp) * 9.0f / 5.0f) + 32.0f + 0.5f;
-  Serial.printf("Engine Temperature = %d C (%d F)\n", g_EngineTemp, Farh);
+  int32_t farh = (float(g_EngineTemp) * 9.0f / 5.0f) + 32.0f + 0.5f;
+  Serial.printf("Engine Temperature = %d*C (%d*F)\n", g_EngineTemp, farh);
 }
 
 // --------------------------------------------------------
@@ -129,8 +129,27 @@ int32_t CalcEngineOilTemp(const uint8_t* pData)
 
 void PrintEngineOilTemp()
 {
-  int32_t Farh = (float(g_EngineOilTemp) * 9.0f / 5.0f) + 32.0f + 0.5f;
-  Serial.printf("Engine Oil Temperature = %d C (%d F)\n", g_EngineOilTemp, Farh);
+  int32_t farh = (float(g_EngineOilTemp) * 9.0f / 5.0f) + 32.0f + 0.5f;
+  Serial.printf("Engine Oil Temperature = %d*C (%d*F)\n", g_EngineOilTemp, farh);
+}
+
+// --------------------------------------------------------
+// ******** Exhaust Gas Temperature ***********************
+// --------------------------------------------------------
+
+static int32_t g_ExhaustGasTemp = 0;   // Celcius
+
+int32_t CalcExhaustGasTemp(const uint8_t* pData)
+{
+  uint8_t A = pData[4];
+  g_ExhaustGasTemp = (A * 5) - 50;
+  return g_ExhaustGasTemp;
+}
+
+void PrintExhaustGasTemp()
+{
+  int32_t farh = (float(g_ExhaustGasTemp) * 9.0f / 5.0f) + 32.0f + 0.5f;
+  Serial.printf("Exhaust Gas Temperature = %d*C (%d*F)\n", g_ExhaustGasTemp, farh);
 }
 
 // --------------------------------------------------------
@@ -233,8 +252,8 @@ int32_t CalcExternalTemp(const uint8_t* pData)
 
 void PrintExternalTemp()
 {
-  int32_t Farh = (float(g_ExternalTemp) * 9.0f / 5.0f) + 32.0f + 0.5f;
-  Serial.printf("External Temperature = %d C (%d F)\n", g_ExternalTemp, Farh);
+  int32_t farh = (float(g_ExternalTemp) * 9.0f / 5.0f) + 32.0f + 0.5f;
+  Serial.printf("External Temperature = %d*C (%d*F)\n", g_ExternalTemp, farh);
 }
 
 // --------------------------------------------------------

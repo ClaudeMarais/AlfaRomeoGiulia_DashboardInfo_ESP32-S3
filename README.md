@@ -14,6 +14,7 @@ A big thank you to the Alfisti community for reverse enginering some of these PI
 | Max 23 psi @ 5200 rpm D2          | When car is just idling, e.g. at red traffic light, show interesting information when max turbo boost was measured |
 | Battery is low! &nbsp;12.2V       | A warning message when the car battery is lower than 12.4V                                                         |
 | Careful, engine is cold           | A warning message when engine speed is higher than 3000 RPM while the engine oil temperature is below 70*C         |
+| Turbo cooling down 1:12           | A countdown timer roughly estimating for how long the car has to idle for a turbo cooldown after a spirited drive  |
 
 Car data like RPM and boost pressure can be retrieved from the high speed CAN bus, but sending text to the dashboard uses the low speed CAN bus. Since one CAN controller can only communicate on one CAN bus, we require two CAN controllers. The ESP32-S3 has a built-in CAN controller, so we connect a SN65HVD230 CAN transceiver to the ESP32-S3 which communicates on the high speed bus. A separate MCP2515 CAN bus controller with its own TJA1050 transceiver is used to communicate on the low speed CAN bus. The ESP32-S3 has two cores, so it's convenient to continuously collect car data on one core from the high speed CAN bus, while at the same time send information to the dashboard on the low speed CAN bus using the other ESP32-S3 core.
 

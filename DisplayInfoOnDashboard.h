@@ -6,6 +6,7 @@
 #include "AA_MCP2515.h"
 #include "AsyncTimer.h"
 #include "Version.h"
+#include "ProcessCarData.h"
 
 // CAN frames include 8 bytes of data. We have a total of 24 characters on the dashboard, therefore the characters will be sent
 // using multiple CAN frames. The data for this specific CAN ID uses the first two bytes to encode the total number of frames
@@ -27,37 +28,31 @@ volatile bool bIncomingRadioFrame = false;
 
 enum InfoToDisplay
 {
-  infoCurrentInfoWithEngineTemp,    // While driving, show turbo boost pressure, current gear and engine temperature
-  infoCurrentInfoWithEngineOilTemp, // While driving, show turbo boost pressure, current gear and engine oil temperature
-  infoCurrentInfoWithBattery,       // While driving, show turbo boost pressure, current gear and battery voltage
-  infoCurrentInfoWithSquadra,       // While driving, show turbo boost pressure, current gear and that Squadra performance tune is enabled
+  infoDrivingInfoWithEngineTemp,    // While driving, show turbo boost pressure, current gear and engine temperature
+  infoDrivingInfoWithEngineOilTemp, // While driving, show turbo boost pressure, current gear and engine oil temperature
+  infoDrivingInfoWithBattery,       // While driving, show turbo boost pressure, current gear and battery voltage
+  infoDrivingInfoWithSquadra,       // While driving, show turbo boost pressure, current gear and that Squadra performance tune is enabled
   infoMaxBoost,                     // When car is idling, show information about when maximum turbo boost was obtained
+  infoTurboCooldownTimer,           // After a spirited drive, show a timer to cooldown the turbo before switching off the car
   infoWarningLowBattery,            // When car is idling, show warning when car battery is low
-  infoWarningColdEngine             // Don't drive too hard when engine is cold. This warning isn't for me, but for my son when he's driving my car :-)
+  infoWarningColdEngine,            // Don't drive too hard when engine is cold. This warning isn't for me, but for my son when he's driving my car :-)
+  NumInfoMessages                   // Total number of info messages
 };
+
+bool bIsInfoActive[InfoToDisplay::NumInfoMessages];   // Multiple message could be active at a time, so keep track of which one to display
 
 AsyncTimer timerShowNameAndVersion(10000);            // When car is turned on, show name and version for 10 seconds
 AsyncTimer timerWaitBeforeShowingInfoWhileIdle(2000); // Some info show only when car is at ~idle. We don't want to immediately show those, but rather wait 2 seconds
-AsyncTimer timerToggleCurrentInfo(3000);              // Every 3 seconds toggle info like engine temp, engine oil temp, battery V, etc.
+AsyncTimer timerToggleInfoWhileDriving(3000);         // Every 3 seconds toggle info while driving, e.g. like engine temp, engine oil temp, battery V, etc.
+AsyncTimer timerToggleInfoWhileIdling(5000);          // Every 5 seconds toggle info while idlings, e.g. max boost, warnings, etc.
 
-// Every 2 seconds, toggle from infoCurrentInfoWithEngineTemp .. infoCurrentInfoWithBattery
-uint8_t currentInfoIndex = infoCurrentInfoWithEngineTemp;
-uint8_t maxCurrentInfoIndex = infoCurrentInfoWithBattery;
+// While driving, every 3 seconds toggle from [infoDrivingInfoWithEngineTemp .. infoDrivingInfoWithBattery]
+uint8_t infoIndexWhileDriving = infoDrivingInfoWithEngineTemp;
+const uint8_t MaxInfoIndexWhileDriving = infoDrivingInfoWithBattery;
 
-// g_CurrentCarData is populated by the SN65HVD230 transceiver on another ESP32-S3 core. Since the data needs to be thread safe, we keep a
-// local copy of the data on this thread, copying it safely using g_SemaphoreCarData
-CarData carData;
-
-// We need to keep track of the max turbo boost pressure, at what engine RPM and in which gear that happended
-float   turboBoostPsi = 0.0f;
-float   maxBoostPsi   = 0.0f;
-int32_t maxBoostRPM   = 0;
-int32_t maxBoostGear  = 0;
-
-// Don't want to drive the car too hard while the engine is still cold, so keep track of the max RPM while engine is still cold. We'll use 3000 RPM as a safe RPM
-int32_t maxColdRPM    = 0;
-const int32_t ColdEngineSafeRPM = 3000;
-const int32_t SquadraSafeOilTemperature = 70; // Squadra is only fully enabled when engine oil reaches 70*C, so use that as a safety temp for when engine is still cold
+// While idling, every 5 seconds toggle from [infoMaxBoost .. infoWarningColdEngine]
+uint8_t infoIndexWhileIdling = infoMaxBoost;
+const uint8_t MinInfoIndexWhileIdling = infoMaxBoost;
 
 // Setup for the MCP2515 CAN controller connected to the low speed CAN bus, which uses 125Kbps
 const CANBitrate::Config CAN_BITRATE = CANBitrate::Config_8MHz_125kbps;
@@ -98,6 +93,16 @@ void SetupDisplayInfoOnDashboard()
   //CAN.setInterruptCallbacks(&OnReceive, nullptr);
 
   DebugPrintln("MCP2515 CAN controller initialized");
+
+  // Set all messages inactive
+  for (int i = 0; i < InfoToDisplay::NumInfoMessages; i++)
+  {
+    bIsInfoActive[i] = false;
+  }
+
+  // Start the count down timer that monitors turbo cooldown conditions
+  timerTurboCooldown.Start();
+  timerTurboCooldownMonitor.Start();
 }
 
 // When the car is not turned on, we want to put the device into a low power mode
@@ -124,18 +129,16 @@ void ClearDashboardText()
 // custom messages, sometimes the Radio FM will send its own messages and cause the custom message to flicker. But, if you listen
 // to Radio AM and you use Radio FM for custom messages, then there is no flickering, until you listen to AM. It's similar to groups,
 // e.g. Phone messages seem to be higher priority than Radio messages, therefore Radio messages won't interfere with Phone messages
-// or Navigation messages. Below are some message "infoCode" values which I identified. I chose to use the Media Center USB channel,
-// since I never use USB and there is no radio text interference when using this channel. Unfortunately, it does show a small USB icon
-// next to the custom text, but I can get used to the icon, I don't know that I can get used to some flickering.
+// or Navigation messages. Below are some message "infoCode" values which I identified.
 
-// 0x00 - ?         - Occasional short flicker from radio station info interfering with custom text
-// 0x02 - FM radio  - Occasional short flicker from radio station info interfering with custom text
-// 0x03 - AM radio  - Occasional short flicker from radio station info interfering with custom text
-// 0x05 - Aux       - Occasional long flicker from radio station info interfering with custom text
-// 0x06 - USB left  - No flicker, but shows USB icon and sometimes display freezes for a few seconds
-// 0x07 - USB right - No flicker, but shows USB icon and sometimes display freezes for a few seconds
-// 0x08 - USB front - No flicker, but shows USB icon and sometimes display freezes for a few seconds
-// 0x09 - Bluetooth - Occasional long flicker from radio station info interfering with custom text
+// 0x00 - 0x01 ?
+// 0x02 - FM radio
+// 0x03 - AM radio
+// 0x05 - Aux
+// 0x06 - USB left
+// 0x07 - USB right
+// 0x08 - USB front
+// 0x09 - Bluetooth
 const uint8_t InfoCode = 0x05;
 
 // Send one CAN frame to set three of the UTF characters in the text
@@ -191,7 +194,20 @@ uint8_t GetRadioInfoCode(uint8_t* pData)
   return pData[1] & 0b00111111;
 }
 
+// Used to receive radio CAN frames
 CANFrame rxFrame;
+
+// Some interesting observations, maybe this is very specific to my car's infotainmaint/dashboard systems
+// - Frames from the radio are sent to the dashboard at 33Hz, or one frame every 30ms
+// - In most cases 8 text characters are sent to the dashboard, i.e. 3 frames of text
+// - Some radio stations send new frames to the dashboard every 2.5 seconds, others only when you switch to that radio station
+// - It seems there is some ACK that the infotainment system requires from the dashboard, otherwise it will resend all three radio frames again after 120ms
+// - This means if you interrupt the radio frames in a certain way, you can easily flood the CAN bus, resulting in freezing either custom text or radio text on the dashboard
+// - Different visual artifacts can be seen, and it's hard to overcome all of them:
+//      - Split second flickering from radio station text when it briefly overwrites our own custom text
+//      - Longer 1/4 to 1/2 second periods where the radio station's first 3 characters, or first frame, is shown
+//      - Longer 1/4 to 1/2 second periods where the custom text is frozen, i.e. not updating at 5 times a second, meaning data like boost psi and current gear might be old
+//      - Short periods, maybe 10th of second, where the dashboard text is either fully cleared or some portions are cleared
 
 // Send multiple CAN frames to display all the text
 void SetDashboardText(char* text, uint32_t timeToDisplayText)
@@ -204,12 +220,6 @@ void SetDashboardText(char* text, uint32_t timeToDisplayText)
     SetDashboardTextCharacters(NumFramesToDisplayText, currentFrame, text + characterStartPosition);
     delay(delayTimeBetweenFrames);
    
-    // We don't care if a radio frame interrupts our custom text half way through the frame sequence
-    if (currentFrame < (NumFramesToDisplayText / 2))
-    {
-      continue;
-    }
-
     // Check if there was a radio frame. Since we setup a hardware filter, we know that the only frames received
     // would be from CAN_Id::DashboardText
     if (CAN.read(rxFrame) == CANController::IOResult::OK)
@@ -219,10 +229,17 @@ void SetDashboardText(char* text, uint32_t timeToDisplayText)
       auto numRadioFrames = GetNumRadioFrames(radioData);
       auto currentRadioFrame = GetCurrentRadioFrame(radioData);
       auto radioInfoCode = GetRadioInfoCode(radioData);
+      DebugPrintf("Received radio frame: %d\n", currentRadioFrame);
 
       if (radioInfoCode == InfoCode)
       {
         continue;
+      }
+
+      // When we observe the 2nd radio frame, interrupt the radio frames with our own first frame
+      if (currentRadioFrame == 1)
+      {
+        SetDashboardTextCharacters(NumFramesToDisplayText, 0, text);
       }
 
       // Wait until we see the last radio frame and restart our custom frames
@@ -233,6 +250,13 @@ void SetDashboardText(char* text, uint32_t timeToDisplayText)
           rxFrame.getData(radioData, 8);
           numRadioFrames = GetNumRadioFrames(radioData);
           currentRadioFrame = GetCurrentRadioFrame(radioData);
+          DebugPrintf("Received radio frame: %d\n", currentRadioFrame);
+
+          // When we observe the 2nd radio frame, interrupt the radio frames with our own first frame
+          if (currentRadioFrame == 1)
+          {
+            SetDashboardTextCharacters(NumFramesToDisplayText, 0, text);
+          }
         }
       }
 
@@ -261,54 +285,104 @@ void GenerateGearText(int32_t gear, char* gearText)
 // Given the current car data, generate the full text to be displayed
 void GenerateText(char* text)
 {
+  // Show project name when the car turns on
   if (!timerShowNameAndVersion.RanOut())
   {
     sprintf(text, "    %s   v%1.1f", g_ProjectName, g_Version);
     return;
   }
 
-  if (timerToggleCurrentInfo.RanOut())
+  if (timerToggleInfoWhileDriving.RanOut())
   {
-    currentInfoIndex++;
-    if (currentInfoIndex > maxCurrentInfoIndex)
-    {
-      currentInfoIndex = 0;
-    }
+    timerToggleInfoWhileDriving.Start();
 
-    timerToggleCurrentInfo.Start();
+    infoIndexWhileDriving++;
+    if (infoIndexWhileDriving > MaxInfoIndexWhileDriving)
+    {
+      infoIndexWhileDriving = 0;
+    }
   }
 
-  InfoToDisplay infoToDisplay = infoCurrentInfoWithEngineTemp;
+  static bool bFoundActiveIdleMessage = false;
+
+  InfoToDisplay infoToDisplay = infoDrivingInfoWithEngineTemp;
 
   char gearText[8] = { 0 };
 
   // Choose what info to show while driving
 
 #ifdef SHOW_SQUADRA_MESSAGE
-  if (carData.DriveMode == DNASelector::D &&                // Squadra tune is only enabled in Dynamic drive mode
-      carData.EngineOilTemp >= SquadraSafeOilTemperature)   // and only fully enabled when engine oil reaches 70*C (158*F)
+  if (IsSquadraEnabled())
   {
-    infoToDisplay = InfoToDisplay::infoCurrentInfoWithSquadra;
+    infoToDisplay = InfoToDisplay::infoDrivingInfoWithSquadra;
   }
   else
 #endif
   {
-    if (carData.EngineOilTemp < SquadraSafeOilTemperature &&
-        carData.EngineRPM > ColdEngineSafeRPM)
+    if (IsEngineColdAndHighRPM())
     {
-      // Reached high RPM while engine is still cold
       infoToDisplay = InfoToDisplay::infoWarningColdEngine;
     }
     else
     {
-      infoToDisplay = (InfoToDisplay)currentInfoIndex;
+      infoToDisplay = (InfoToDisplay)infoIndexWhileDriving;
     }
   }
 
-  // Check to see if car is kind of idling and show other information
-  if (carData.EngineRPM < 1000 ||   // Engine is barely above idle
-      carData.Gear == -1)           // Car is in Reverse
+  // Check to see if car is kind of idling and show "while idling" information
+  if (IsCarIdlingOrInReverse())
   {
+    // It's not interesting to display boost psi that is less than 1.0f
+    if (IsBoostInfoInteresting())
+    {
+      // Show info about max boost
+      bIsInfoActive[infoMaxBoost] = true;
+    }
+
+    if (IsBatteryLow())
+    {
+      bIsInfoActive[infoWarningLowBattery] = true;
+    }
+
+    if (IsEngineColdAndHighRPM())
+    {
+      bIsInfoActive[infoWarningColdEngine] = true;
+    }
+
+    if (IsTurboStillCoolingDown())
+    {
+      bIsInfoActive[infoTurboCooldownTimer] = true;
+    }
+
+    if (timerToggleInfoWhileIdling.RanOut())
+    {
+      timerToggleInfoWhileIdling.Start();
+
+      const uint8_t numIdleMessages = NumInfoMessages - MinInfoIndexWhileIdling;
+      for (uint8_t i = 0; i < numIdleMessages; i++)
+      {
+        infoIndexWhileIdling++;
+        if (infoIndexWhileIdling >= NumInfoMessages)
+        {
+          infoIndexWhileIdling = MinInfoIndexWhileIdling;
+        }
+
+        if (bIsInfoActive[infoIndexWhileIdling])
+        {
+          bFoundActiveIdleMessage = true;
+          break;
+        }
+      }
+
+      // Set all messages inactive
+      for (int i = 0; i < InfoToDisplay::NumInfoMessages; i++)
+      {
+        bIsInfoActive[i] = false;
+      }
+    }
+
+    // Wait a little bit before switching to show "while idle" messages, just in case you're driving with very low revs which will
+    // mean the messages can flicker when it quicky switches between "while idle" and "while driving"
     if (!timerWaitBeforeShowingInfoWhileIdle.IsActive())
     {
       timerWaitBeforeShowingInfoWhileIdle.Start();
@@ -316,36 +390,21 @@ void GenerateText(char* text)
 
     if (timerWaitBeforeShowingInfoWhileIdle.RanOut())
     {
-      // It's not interesting to display boost psi that is less than 1.0f
-      if (maxBoostPsi > 1.0f)
+      if (bFoundActiveIdleMessage)
       {
-        // Show info about max boost
-        infoToDisplay = InfoToDisplay::infoMaxBoost;
-      }
-
-      // If there are any warning messages, show those instead of interesting max boost info
-      if (carData.Battery > 0.0f &&
-          carData.Battery < 12.4f )
-      {
-        // Car battery voltage is low
-        infoToDisplay = InfoToDisplay::infoWarningLowBattery;
-      }
-      else if (carData.EngineOilTemp < SquadraSafeOilTemperature &&
-               maxColdRPM > ColdEngineSafeRPM)
-      {
-        // Reached high RPM while engine is still cold
-        infoToDisplay = InfoToDisplay::infoWarningColdEngine;
+        infoToDisplay = (InfoToDisplay)infoIndexWhileIdling;
       }
     }
   }
   else
   {
+    bFoundActiveIdleMessage = false;
     timerWaitBeforeShowingInfoWhileIdle.Stop();
   }
 
   switch (infoToDisplay)
   {    
-    case InfoToDisplay::infoCurrentInfoWithEngineTemp:
+    case InfoToDisplay::infoDrivingInfoWithEngineTemp:
     {
       // Example:   " 23 psi   D1   Eng 200*F"
       GenerateGearText(carData.Gear, gearText); // Current gear
@@ -354,7 +413,7 @@ void GenerateText(char* text)
       break;
     }
 
-    case InfoToDisplay::infoCurrentInfoWithEngineOilTemp:
+    case InfoToDisplay::infoDrivingInfoWithEngineOilTemp:
     {
       // Example:   " 23 psi   D1   Oil 200*F"
       GenerateGearText(carData.Gear, gearText); // Current gear
@@ -363,7 +422,7 @@ void GenerateText(char* text)
       break;
     }
 
-    case InfoToDisplay::infoCurrentInfoWithBattery:
+    case InfoToDisplay::infoDrivingInfoWithBattery:
     {
       // Example:   " 23 psi   D1   Bat 12.6V"
       GenerateGearText(carData.Gear, gearText); // Current gear
@@ -371,7 +430,7 @@ void GenerateText(char* text)
       break;
     }
 
-    case InfoToDisplay::infoCurrentInfoWithSquadra:
+    case InfoToDisplay::infoDrivingInfoWithSquadra:
     { 
       // Example:   " 23 psi   D1   Squadra  "
       GenerateGearText(carData.Gear, gearText); // Current gear
@@ -385,6 +444,23 @@ void GenerateText(char* text)
       GenerateGearText(maxBoostGear, gearText); // Gear when max boost pressure was measured
       sprintf(text, "Max %2d psi @ %4d rpm", int32_t(maxBoostPsi + 0.5f), maxBoostRPM);
       sprintf(text, "%s %s", text, gearText);
+      break;
+    }
+
+    case InfoToDisplay::infoTurboCooldownTimer:
+    {
+      // Example:   "Turbo cooling down 1:12 "
+      auto secondsLeft = GetTurboCooldownSeconds();
+      if (secondsLeft > 0)
+      {
+        int32_t min = secondsLeft / 60;
+        int32_t sec = secondsLeft - (min * 60);
+        sprintf(text, "Turbo cooling down  %1d:%02d", min, sec);
+      }
+      else
+      {
+        sprintf(text, "    Turbo cooled down   ");
+      }
       break;
     }
 
@@ -410,41 +486,21 @@ void DisplayInfoOnDashboard(void* params)
 {
   DebugPrintf("Core %d: DisplayInfoOnDashboard()\n", xPortGetCoreID());
 
-  timerToggleCurrentInfo.Start();
+  timerToggleInfoWhileDriving.Start();
+  timerToggleInfoWhileIdling.Start();
 
   // Just for safety, we make the text twice as long as we realy need
   char text[NumCharsInText * 2] = "Initializing .....";
 
   while (true)
   {
-    // Make a local copy of car data that was gathered on the other ESP32-S3 core
-    xSemaphoreTake(g_SemaphoreCarData, portMAX_DELAY);
-    memcpy(&carData, &g_CurrentCarData, sizeof(CarData));
-    xSemaphoreGive(g_SemaphoreCarData);
+    CopyCarData();
 
     // Only send CAN from to the dashboard if the car is actually turned on. It looks like the act of sending frames to the dashboard
     // after the car turned off keeps the car in an "active" state, draining the battery.
     if (carData.bCarTurnedOn)
     {
-      // Calculate the turbo boost pressure using atmospheric pressure and absolute boost pressure (1013 mbar is sea level)
-      turboBoostPsi = _min(_max(0.0f, float(carData.BoostPressure - carData.AtmosphericPressure)) * 0.0145038f, 40.0f);
-
-      if (turboBoostPsi > maxBoostPsi &&
-          carData.AtmosphericPressure > 0)    // If we don't have valid data for atmospheric pressure, the max boost will be completely wrong
-      {
-        maxBoostRPM   = carData.EngineRPM;
-        maxBoostGear  = carData.Gear;
-        maxBoostPsi   = turboBoostPsi;
-        DebugPrintf("\nMax turbo boost pressure = %.1f psi @ %d RPM in gear %d\n", maxBoostPsi, maxBoostRPM, maxBoostGear);
-      }
-
-      // Keep track of when RPMs are high when engine is still cold
-      if (carData.EngineOilTemp < SquadraSafeOilTemperature &&
-          carData.EngineRPM > maxColdRPM)
-      {
-        maxColdRPM = carData.EngineRPM;
-      }
-      
+      ProcessCarData();
       GenerateText(text);
       SetDashboardText(text, TimeToDisplayText);
     }

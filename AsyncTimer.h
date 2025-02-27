@@ -8,6 +8,7 @@ class AsyncTimer
   public:
     AsyncTimer(const unsigned long duration = 0)
     {
+      m_start = 0;
       m_duration = duration;
       m_bIsActive = false;
     }
@@ -17,6 +18,11 @@ class AsyncTimer
     inline void Stop() { m_bIsActive = false; }
 
     inline bool IsActive() { return m_bIsActive; }
+
+    inline unsigned long GetTimeLeft()
+    {
+       return _max(0, int32_t(m_duration) - int32_t(millis() - m_start));
+    }
 
     void Start(const unsigned long duration)
     {

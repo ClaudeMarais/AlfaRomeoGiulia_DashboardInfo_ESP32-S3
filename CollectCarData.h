@@ -10,8 +10,9 @@
 
 // Define our OBD2 PIDs for Alfa Romeo Giulia
 PID PIDs[] = { { "Boost Pressure",        CarModule::ECM, OBD2Service::ManufacturerSpecific, 0x195a, &CalcBoostPressure,        PrintBoostPressure },
-               { "Engine Temp",           CarModule::ECM, OBD2Service::ManufacturerSpecific, 0x1003, &CalcEngineTemp,           PrintEngineTemp } ,
+               { "Engine Temp",           CarModule::ECM, OBD2Service::ManufacturerSpecific, 0x1003, &CalcEngineTemp,           PrintEngineTemp },
                { "Engine Oil Temp",       CarModule::ECM, OBD2Service::ManufacturerSpecific, 0x1302, &CalcEngineOilTemp,        PrintEngineOilTemp },
+               { "Exhaust Gas Temp",      CarModule::ECM, OBD2Service::ManufacturerSpecific, 0x18ba, &CalcExhaustGasTemp,       PrintExhaustGasTemp },
                { "Atmospheric Pressure",  CarModule::ECM, OBD2Service::ManufacturerSpecific, 0x1956, &CalcAtmosphericPressure,  PrintAtmosphericPressure },
                { "Ignition Key Position", CarModule::BCM, OBD2Service::ManufacturerSpecific, 0x0131, &CalcIgnitionKeyPosition,  PrintIgnitionKeyPosition },
                { "Battery",               CarModule::ECM, OBD2Service::ManufacturerSpecific, 0x1004, &CalcBattery,              PrintBattery } };
@@ -22,6 +23,7 @@ enum PIDIndex
   BoostPressure,
   EngineTemp,
   EngineOilTemp,
+  ExhaustGasTemp,
   AtmosphericPressure,
   IgnitionKeyPosition,
   Battery,
@@ -31,6 +33,7 @@ enum PIDIndex
 PID* pBoostPressure       = &PIDs[PIDIndex::BoostPressure];
 PID* pEngineTemp          = &PIDs[PIDIndex::EngineTemp];
 PID* pEngineOilTemp       = &PIDs[PIDIndex::EngineOilTemp];
+PID* pExhaustGasTemp      = &PIDs[PIDIndex::ExhaustGasTemp];
 PID* pAtmosphericPressure = &PIDs[PIDIndex::AtmosphericPressure];
 PID* pIgnitionKeyPosition = &PIDs[PIDIndex::IgnitionKeyPosition];
 PID* pBattery             = &PIDs[PIDIndex::Battery];
@@ -68,6 +71,8 @@ void SetupCollectCarData()
 {
   DebugPrintln("SetupCollectCarData()");
 
+  memset(&g_CurrentCarData, 0, sizeof(g_CurrentCarData));
+
   NormalMode_SN65HVD230();
 
   // Start timers
@@ -77,6 +82,7 @@ void SetupCollectCarData()
 
   // Send requests for low freqency now
   SendOBD2Request(pEngineOilTemp);
+  SendOBD2Request(pExhaustGasTemp);
   SendOBD2Request(pAtmosphericPressure);
   SendOBD2Request(pIgnitionKeyPosition);
   SendOBD2Request(pBattery);
@@ -97,6 +103,7 @@ void SendOBD2Requests()
   {
     timerLowFrequency.Start();
     SendOBD2Request(pIgnitionKeyPosition);
+    SendOBD2Request(pExhaustGasTemp);
   }
 
   // This happens every 10 seconds
@@ -167,6 +174,7 @@ void ProcessReceivedCANFrames()
   g_CurrentCarData.EngineRPM = g_EngineRPM;
   g_CurrentCarData.EngineTemp = g_EngineTemp;
   g_CurrentCarData.EngineOilTemp = g_EngineOilTemp;
+  g_CurrentCarData.ExhaustGasTemp = g_ExhaustGasTemp;
   g_CurrentCarData.AtmosphericPressure = g_AtmosphericPressure;
   g_CurrentCarData.BoostPressure = g_BoostPressure;
   g_CurrentCarData.DriveMode = g_DriveMode;

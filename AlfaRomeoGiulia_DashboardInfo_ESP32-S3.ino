@@ -14,6 +14,7 @@
 // | Max 23 psi @ 5200 rpm D2    | When car is just idling, e.g. at red traffic light, show interesting information when max turbo boost was measured |
 // | Battery is low! 12.2V       | A warning message when the car battery is lower than 12.4V                                                         |
 // | Careful, engine is cold     | A warning message when engine speed is higher than 3000 RPM while the engine oil temperature is below 70*C         |
+// | Turbo cooling down 1:12     | A countdown timer roughly estimating for how long the car has to idle for a turbo cooldown after a spirited drive  |
 // |-----------------------------|--------------------------------------------------------------------------------------------------------------------|
 //
 // Car data like RPM and boost pressure can be retrieved from the high speed CAN bus, but sending text to the dashboard uses the low speed CAN bus.
@@ -112,7 +113,7 @@ void setup()
   xSemaphoreGive(g_SemaphoreCarData);
 
   // Create task that will display info on dashboard using ESP32-S3 core 0
-  xTaskCreatePinnedToCore(DisplayInfoOnDashboard, nullptr, 1024 * 64, nullptr, 1, &g_TaskDisplayInfoOnDashboard, 0);
+  xTaskCreatePinnedToCore(DisplayInfoOnDashboard, nullptr, 1024 * 128, nullptr, 1, &g_TaskDisplayInfoOnDashboard, 0);
 
   // Turn onboard LED off if successfully initialized
   digitalWrite(LED_BUILTIN, HIGH);
