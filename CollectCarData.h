@@ -73,6 +73,10 @@ void SetupCollectCarData()
 
   memset(&g_CurrentCarData, 0, sizeof(g_CurrentCarData));
 
+  // Car data will be collected on ESP32-S3 core 1 and used on core 0, so we need to use a semaphore to make sure data is handled safely between the cores
+  g_SemaphoreCarData = xSemaphoreCreateBinary();
+  xSemaphoreGive(g_SemaphoreCarData);
+
   NormalMode_SN65HVD230();
 
   // Start timers

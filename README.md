@@ -20,7 +20,7 @@ Car data like RPM and boost pressure can be retrieved from the high speed CAN bu
 
 The OBD2 connector has an always-on 12V pin where the device will be powered from. Since it's always on, it will unnecessarily draw power when the car is turned off. One option would be to just always unplug the device when not driving, another might be to add a button to the device to manually switch it on/off. In this project, we simply detect if the car is turned on and if not, we put the device into deep sleep mode to heavily reduce the amount of power used. We'll check for 5 seconds if the car is on, then sleep for 12 seconds, etc. While trying to see if the car turns on, the device will draw ~40mA/190mW, but only ~1mA/1mW while in deep sleep.
 
-NOTE: If you intend to experiment and make your own code changes, I recommend enabling the below define for DISABLE_POWER_SAVING_CHECKS. If not, the device will go into deep sleep and you might struggle to upload code to the device, since you have to time it just right. When the device is powered on by plugging it into the computer's USB port, you have 5 seconds before it goes into deep sleep. You want to have the device awake while the code is being uploaded. When using the Arduino IDE, I find that if you unplug the device from your computer's USB port, then wait for message in the Output window that says "Linking everything together...", and then quickly plug the device into your computer's USB port, it gives enough time for the device to stay awake to upload the code.
+NOTE: If you intend to experiment and make your own code changes, I recommend enabling the C++ define for DISABLE_POWER_SAVING_CHECKS found in the file AlfaRomeoGiulia_DashboardInfo_ESP32-S3.ino. If not, the device will go into deep sleep and you might struggle to upload code to the device, since you have to time it just right. When the device is powered on by plugging it into the computer's USB port, you have 5 seconds before it goes into deep sleep. You want to have the device awake while the code is being uploaded. When using the Arduino IDE, I find that if you unplug the device from your computer's USB port, then wait for the message in the Output window that says "Linking everything together...", and then quickly plug the device into your computer's USB port, it gives enough time for the device to stay awake to upload the code.
 
 NOTE: It's fun to tinker with your car, but there is always a chance to mess things up. I won't be liable if for some reason you damage your car.
 
@@ -33,11 +33,12 @@ Some tips:
  - The OBD2 connector has an "always on" 12V pin. Make sure the wire connecting to that pin on your male connector isn't exposed so that it cannot touch other wires!
  - I tried multiple pins on the ESP32-S3 to connect to the SN65HVD230, but only D4/D5 worked for me. Coincidentally these are also the SDA/SCL pins.
  - Check if your car has an OBD2 Security Gateway (SGW). If so, you need to install a SGW Bypass module before you to send/receive OBD2 frames to your car.
+ - For 3D printing, use something like PETG or TPU which is much more resistant to heat than PLA.
 
 Hardware:
  - XIAO ESP32-S3
  - 12V to 5V Voltage regulator
- - SN65HVD230 CAN bus tranceiver
+ - SN65HVD230 CAN bus transceiver
  - MCP2515 CAN bus controller
 
 

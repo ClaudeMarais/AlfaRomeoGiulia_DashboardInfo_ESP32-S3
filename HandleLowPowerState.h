@@ -15,6 +15,9 @@ const uint64_t DeepSleepTime = 12 * 1000000ULL;       // 12 seconds at ~1mA/1mW
 // When the device is awake, wait for 5 seconds trying to see if the car turns on, and then go to deep sleep for 12 seconds again.
 AsyncTimer timerWaitBeforeGoingIntoDeepSleep(5000);   // 5 seconds at ~40mA/190mW
 
+// RTC_DATA_ATTR ensures that this value will persist after waking up from deep sleep
+RTC_DATA_ATTR bool bInDeepSleep = false;
+
 void DeepSleep()
 {
   DebugPrintln("Going into deep sleep");
@@ -48,9 +51,26 @@ void DeepSleep()
 #endif
 
   // Go into deep sleep
-  g_bInDeepSleep = true;
+  bInDeepSleep = true;
   esp_sleep_enable_timer_wakeup(DeepSleepTime);
   esp_deep_sleep_start();
+}
+
+// It's a good idea to reboot the device into a clean state and just start fresh from the setup() function, especially since we're working with multiple threads
+void RebootAfterDeepSleep()
+{
+  if (bInDeepSleep)
+  {
+    bInDeepSleep = false;
+    DebugPrintln("Woke up from deep sleep");
+    DebugPrintln("Rebooting device into clean state");
+
+#ifdef DEBUG
+    Serial.flush();
+#endif
+
+    ESP.restart();
+  }
 }
 
 // Check if there are any CAN frames on the high speed CAN bus

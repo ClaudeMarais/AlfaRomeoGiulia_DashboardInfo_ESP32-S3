@@ -39,9 +39,6 @@ enum CAN_Id
   DashboardText   = 0x090
 };
 
-// It's a good idea to reboot the device after waking up from deep sleep to ensure that everything is in a clean state
-RTC_DATA_ATTR bool g_bInDeepSleep = false;
-
 // Pins for SN65HVD230 - After some failed attempts with the ESP32-S3, it seems that pins TX/RX and D0/D1 don't send/receive data to/from
 // SN65HVD230 correctly, but D4/D5 does. (which coincidentally is also SDA/SCL)
 const uint8_t TXPin = D5;

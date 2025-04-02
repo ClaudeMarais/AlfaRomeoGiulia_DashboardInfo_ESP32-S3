@@ -50,7 +50,7 @@
 // Hardware:
 //    XIAO ESP32-S3
 //    12V to 5V Voltage regulator
-//    SN65HVD230 CAN bus tranceiver
+//    SN65HVD230 CAN bus transceiver
 //    MCP2515 CAN bus controller
 //
 // Arduino library used:
@@ -85,18 +85,7 @@ void setup()
 #endif
 
   // It's a good idea to reboot the device into a clean state and just start fresh from the setup() function, especially since we're working with multiple threads
-  if (g_bInDeepSleep)
-  {
-    g_bInDeepSleep = false;
-    DebugPrintln("Woke up from deep sleep");
-    DebugPrintln("Rebooting device into clean state");
-
-#ifdef DEBUG
-    Serial.flush();
-#endif
-
-    ESP.restart();
-  }
+  RebootAfterDeepSleep();
 
   // If the car is turned on we'll continue with the rest of the setup. If it's not, wait a while to see if it turns on, othrewise go into deep sleep
   WaitForCarToTurnOn();
@@ -107,10 +96,6 @@ void setup()
 
   SetupCollectCarData();
   SetupDisplayInfoOnDashboard();
-
-  // Car data will be collected on ESP32-S3 core 1 and used on core 0, so we need to use a semaphore to make sure data is handled safely between the cores
-  g_SemaphoreCarData = xSemaphoreCreateBinary();
-  xSemaphoreGive(g_SemaphoreCarData);
 
   // Create task that will display info on dashboard using ESP32-S3 core 0
   xTaskCreatePinnedToCore(DisplayInfoOnDashboard, nullptr, 1024 * 128, nullptr, 1, &g_TaskDisplayInfoOnDashboard, 0);

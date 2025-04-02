@@ -16,9 +16,8 @@ const uint8_t NumCharsInText = 24;
 const uint8_t NumUTFCharsPerFrame = 3;
 const uint8_t NumFramesToDisplayText = NumCharsInText / NumUTFCharsPerFrame;
 
-// Update information 5 times a second. Since we need 8 CAN frames to update all the information in 200ms, we need to send one CAN frame every 25ms
-const uint32_t TimeToDisplayText = 1000 / 5;
-const uint32_t DelayTimeBetweenFrames = TimeToDisplayText / NumFramesToDisplayText;
+// The infotainment system sends CAN frames to the dashboard 30ms apart. We'll send our custom frams very slightly faster than that
+const uint32_t DelayTimeBetweenFrames = 29;
 
 // Keep track of whenever a CAN frame is observed that was sent to display text on the dashboard. For example, the radio can sometimes send
 // information about what's playing on the radio, e.g. every 2.5 seconds. These frames will interfere with the sequence of custom frames we
@@ -111,10 +110,22 @@ void SleepMCP2515()
   CAN.setMode(CANController::Mode::Sleep);
 }
 
-void SendCANMessage(uint32_t canID, uint8_t* pData, uint8_t dlc = 8)
+bool SendCANMessage(uint32_t canID, uint8_t* pData, uint8_t dlc = 8)
 {
   CANFrame canFrame(canID, pData, dlc);
-  CAN.write(canFrame);
+  auto result = CAN.write(canFrame);
+
+  if (result != CANController::IOResult::OK)
+  {
+    DebugPrintln("\nERROR sending CAN frame!");
+#ifdef DEBUG
+    auto errors = CAN.getErrors();
+    errors.print();
+#endif
+    return false;
+  }
+
+  return true;
 }
 
 // This will clear the text on the dashboard, but it's not required to send every time we want to update text
@@ -142,7 +153,7 @@ void ClearDashboardText()
 const uint8_t InfoCode = 0x05;
 
 // Send one CAN frame to set three of the UTF characters in the text
-void SetDashboardTextCharacters(uint8_t numFrames, uint8_t currentFrame, char* text)
+bool SetDashboardTextCharacters(uint8_t numFrames, uint8_t currentFrame, char* text)
 {
   const uint8_t indexOfLastFrame = numFrames - 1;
   const uint8_t utfCharStartIndex = 2;  // First UTF character is in canData[2]
@@ -168,7 +179,8 @@ void SetDashboardTextCharacters(uint8_t numFrames, uint8_t currentFrame, char* t
     canData[utfCharStartIndex + canDataIndex + 1] = text[i];
   }
 
-  SendCANMessage(CAN_Id::DashboardText, canData);
+  bool success = SendCANMessage(CAN_Id::DashboardText, canData);
+  return success;
 }
 
 // Given a received radio frame, find the current frame
@@ -198,71 +210,97 @@ uint8_t GetRadioInfoCode(uint8_t* pData)
 CANFrame rxFrame;
 
 // Some interesting observations, maybe this is very specific to my car's infotainmaint/dashboard systems
-// - Frames from the radio are sent to the dashboard at 33Hz, or one frame every 30ms
+// - Frames from the radio are sent to the dashboard at 33Hz, or 30ms apart
 // - In most cases 8 text characters are sent to the dashboard, i.e. 3 frames of text
 // - Some radio stations send new frames to the dashboard every 2.5 seconds, others only when you switch to that radio station
 // - It seems there is some ACK that the infotainment system requires from the dashboard, otherwise it will resend all three radio frames again after 120ms
 // - This means if you interrupt the radio frames in a certain way, you can easily flood the CAN bus, resulting in freezing either custom text or radio text on the dashboard
-// - Different visual artifacts can be seen, and it's hard to overcome all of them:
-//      - Split second flickering from radio station text when it briefly overwrites our own custom text
-//      - Longer 1/4 to 1/2 second periods where the radio station's first 3 characters, or first frame, is shown
-//      - Longer 1/4 to 1/2 second periods where the custom text is frozen, i.e. not updating at 5 times a second, meaning data like boost psi and current gear might be old
-//      - Short periods, maybe 10th of second, where the dashboard text is either fully cleared or some portions are cleared
+//
+// - Different visual artifacts can be seen:
+//      - Split second flickering from radio station text when it briefly overwrites our own custom text, e.g. briefly see first 3 characters of radio station
+//        Example: "My custom text" then "Rad" then "My custom text" again
+//
+//      - Infrequently random characters will be displayed in our custom text, or characters removed, or large sections of text removed
+//        Example: "?il" or "il" instead of "Oil"
+//        This is due to corrupted or lost CAN frames sent from the MCP2515 CAN bus controller to the dashboard. CAN controllers are supposed to handle these cases and resend
+//        such frames. But, these controllers are super cheap and perhaps don't go through the best of quality control. Unfortunately I haven't found a way to detect when this happens
 
 // Send multiple CAN frames to display all the text
-void SetDashboardText(char* text, uint32_t timeToDisplayText)
-{
-  unsigned long delayTimeBetweenFrames = DelayTimeBetweenFrames;
-
+void SetDashboardText(char* text)
+{ 
   for (int currentFrame = 0; currentFrame < NumFramesToDisplayText; currentFrame++)
   {
     uint8_t characterStartPosition = currentFrame * NumUTFCharsPerFrame;
-    SetDashboardTextCharacters(NumFramesToDisplayText, currentFrame, text + characterStartPosition);
-    delay(delayTimeBetweenFrames);
-   
+    if (!SetDashboardTextCharacters(NumFramesToDisplayText, currentFrame, text + characterStartPosition))
+    {
+      // If there is an error sending a frame, then quit sending the rest of our custom frames, which will restart the sequence with new data.
+      return;
+    }
+
+    delay(DelayTimeBetweenFrames);
+
     // Check if there was a radio frame. Since we setup a hardware filter, we know that the only frames received
     // would be from CAN_Id::DashboardText
     if (CAN.read(rxFrame) == CANController::IOResult::OK)
     {
+      bool bNewFrameReceived = true;
       uint8_t radioData[8];
-      rxFrame.getData(radioData, 8);
-      auto numRadioFrames = GetNumRadioFrames(radioData);
-      auto currentRadioFrame = GetCurrentRadioFrame(radioData);
-      auto radioInfoCode = GetRadioInfoCode(radioData);
-      DebugPrintf("Received radio frame: %d\n", currentRadioFrame);
-
-      if (radioInfoCode == InfoCode)
-      {
-        continue;
-      }
-
-      // When we observe the 2nd radio frame, interrupt the radio frames with our own first frame
-      if (currentRadioFrame == 1)
-      {
-        SetDashboardTextCharacters(NumFramesToDisplayText, 0, text);
-      }
+      uint8_t numRadioFrames = -1;
+      uint8_t currentRadioFrame = 0;
+      uint8_t radioInfoCode = 0;
 
       // Wait until we see the last radio frame and restart our custom frames
       while (currentRadioFrame < (numRadioFrames - 1))
       {
-        if (CAN.read(rxFrame) == CANController::IOResult::OK)
+        if (bNewFrameReceived)
         {
+          // Let's do an extra check for the dashboard CAN ID, just in case something goes wrong with the hardware filter
+          if (rxFrame.getId() != CAN_Id::DashboardText)
+          {
+            DebugPrintf("Warning: Received non-dashboard frame (%x)\n", rxFrame.getId());
+            goto NoRadioFramesWereObserved;
+          }
+
           rxFrame.getData(radioData, 8);
           numRadioFrames = GetNumRadioFrames(radioData);
           currentRadioFrame = GetCurrentRadioFrame(radioData);
-          DebugPrintf("Received radio frame: %d\n", currentRadioFrame);
+          radioInfoCode = GetRadioInfoCode(radioData);
+          DebugPrintf("Received radio frame: %d (of %d) infoCode = %x\n", currentRadioFrame, numRadioFrames, radioInfoCode);
 
-          // When we observe the 2nd radio frame, interrupt the radio frames with our own first frame
-          if (currentRadioFrame == 1)
+          // If the observed frame has a higher info code, it could be something like a phone message
+          if (radioInfoCode >= InfoCode)
+          {
+            // Just continue as if we had no checks, and accept the infotainment frame flicker
+            goto NoRadioFramesWereObserved;
+          }
+
+          // When we observe the 2nd or 2nd last radio frame, interrupt the radio frames with our own first frame
+          if (currentRadioFrame == 1 ||
+              currentRadioFrame == (numRadioFrames - 1 - 1))
           {
             SetDashboardTextCharacters(NumFramesToDisplayText, 0, text);
           }
+
+          bNewFrameReceived = false;
+        }
+
+        if (CAN.read(rxFrame) == CANController::IOResult::OK)
+        {
+          bNewFrameReceived = true;
+        }
+        else
+        {
+          delay(5);
         }
       }
 
-      // Restart the loop and start displaying our custom frames from the start, and also shorten the delay time between custom frames
-      currentFrame = -1;
-      delayTimeBetweenFrames = DelayTimeBetweenFrames - 5;
+      // The last radio frame has now been observed, so quit sending the rest of our custom frames, which will restart the sequence with new data
+      return;
+    }
+    else
+    {
+      // No radio frames observed, so just continue sending our next custom frame
+      NoRadioFramesWereObserved:
     }
   }
 }
@@ -502,12 +540,12 @@ void DisplayInfoOnDashboard(void* params)
     {
       ProcessCarData();
       GenerateText(text);
-      SetDashboardText(text, TimeToDisplayText);
+      SetDashboardText(text);
     }
     else
     {
       timerShowNameAndVersion.Start();
-      delay(TimeToDisplayText);
+      delay(200);
     }
   }
 }
