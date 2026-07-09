@@ -16,6 +16,8 @@ int32_t maxBoostGear  = 0;
 // Don't want to drive the car too hard while the engine is still cold, so keep track of the max RPM while engine is still cold. We'll use 3000 RPM as a safe RPM
 int32_t maxColdRPM    = 0;
 const int32_t ColdEngineSafeRPM = 3000;
+const int32_t EngineTempTooHigh = 120;          // *C (248*F). EngineTemp is in Celsius. Normal cruise 90-105*C, so 120*C = real overheat danger
+const int32_t EngineOilTempTooHigh = 135;       // *C (275*F). EngineOilTemp is in Celsius. Track oil is normally 115-130*C, so 135*C = real danger (oil breakdown)
 const int32_t SquadraSafeOilTemperature = 70;   // Squadra is only fully enabled when engine oil reaches 70*C, so use that as a safety temp for when engine is still cold
 const int32_t TurboCooldownOilTemperature = 60; // If the engine oil is still relatively cold, it's highly likely that the turbo is still relatively cold too
 
@@ -50,7 +52,7 @@ int32_t monitorMaxExhaustGasTemp = 0;
 // Make a local copy of car data that was gathered on the other ESP32-S3 core
 void CopyCarData()
 {
-  xSemaphoreTake(g_SemaphoreCarData, portMAX_DELAY);
+  if (xSemaphoreTake(g_SemaphoreCarData, pdMS_TO_TICKS(100)) != pdTRUE) return;
   memcpy(&carData, &g_CurrentCarData, sizeof(CarData));
   xSemaphoreGive(g_SemaphoreCarData);
 }
@@ -66,6 +68,16 @@ inline bool IsEngineColdAndHighRPM()
 {
   return (carData.EngineOilTemp < SquadraSafeOilTemperature &&
           carData.EngineRPM > ColdEngineSafeRPM);
+}
+
+inline bool IsEngineTempTooHigh()
+{
+  return (carData.EngineTemp > EngineTempTooHigh);
+}
+
+inline bool IsEngineOilTempTooHigh()
+{
+  return (carData.EngineOilTemp > EngineOilTempTooHigh);
 }
 
 inline bool IsCarIdlingOrInReverse()

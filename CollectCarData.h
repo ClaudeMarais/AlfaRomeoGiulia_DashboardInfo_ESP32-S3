@@ -77,6 +77,7 @@ void SetupCollectCarData()
   g_SemaphoreCarData = xSemaphoreCreateBinary();
   xSemaphoreGive(g_SemaphoreCarData);
 
+  // We need to send OBD2 requests, so use "normal" mode, not "listen only" mode
   NormalMode_SN65HVD230();
 
   // Start timers
@@ -173,7 +174,7 @@ void ProcessReceivedCANFrames()
   }
 
   // Update data to be shared with the other ESP32-S3 core
-  xSemaphoreTake(g_SemaphoreCarData, portMAX_DELAY);
+  if (xSemaphoreTake(g_SemaphoreCarData, pdMS_TO_TICKS(100)) != pdTRUE) return;
   g_CurrentCarData.Gear = g_Gear;
   g_CurrentCarData.EngineRPM = g_EngineRPM;
   g_CurrentCarData.EngineTemp = g_EngineTemp;

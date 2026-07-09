@@ -12,18 +12,23 @@
 // e.g. light around volume knob and on electronic brake button stays on, and non-OBD2 CAN frames continue to be broadcasted.
 const uint64_t DeepSleepTime = 12 * 1000000ULL;       // 12 seconds at ~1mA/1mW
 
+// Normally you wouldn't turn the car off and then on again within 30 seconds. Therefore, if the car just now powered off, put the device
+// into a longer deep sleep mode for 30 seconds before checking if car was turned on again.
+const uint64_t LongDeepSleepTime = 30 * 1000000ULL;   // 30 seconds at ~1mA/1mW
+
 // When the device is awake, wait for 5 seconds trying to see if the car turns on, and then go to deep sleep for 12 seconds again.
 AsyncTimer timerWaitBeforeGoingIntoDeepSleep(5000);   // 5 seconds at ~40mA/190mW
 
 // RTC_DATA_ATTR ensures that this value will persist after waking up from deep sleep
 RTC_DATA_ATTR bool bInDeepSleep = false;
 
-void DeepSleep()
+void DeepSleep(const uint64_t deepSleepTime = DeepSleepTime)
 {
   DebugPrintln("Going into deep sleep");
 
   // SN65HVD230 might be in Normal mode, so switch it to low power Listen Only mode during deep sleep
   ListenOnlyMode_SN65HVD230();
+  ESP32Can.end();
 
   // Stop the thread that's updating the dashboard display
   if (g_TaskDisplayInfoOnDashboard)
@@ -31,9 +36,11 @@ void DeepSleep()
     // At this point g_CurrentCarData.bCarTurnedOn should be false, which will make sure that no CAN frames are sent to the
     // dashboard from the other thread. But, just in case that's not the case, let's force it to be false, since we don't want
     // to be in the middle of sending a CAN frame while shutting down the other thread
-    xSemaphoreTake(g_SemaphoreCarData, portMAX_DELAY);
-    g_CurrentCarData.bCarTurnedOn = false;
-    xSemaphoreGive(g_SemaphoreCarData);
+    if (xSemaphoreTake(g_SemaphoreCarData, pdMS_TO_TICKS(500)) == pdTRUE)
+    {
+      g_CurrentCarData.bCarTurnedOn = false;
+      xSemaphoreGive(g_SemaphoreCarData);
+    }
     delay(500);
 
     vTaskSuspend(g_TaskDisplayInfoOnDashboard);
@@ -46,13 +53,22 @@ void DeepSleep()
     g_TaskDisplayInfoOnDashboard = nullptr;
   }
 
+  // Only delete the semaphore if it was actually created. When the car is off at boot, DeepSleep() can be reached from
+  // WaitForCarToTurnOn() before SetupCollectCarData() creates g_SemaphoreCarData, so it may still be null here. Passing a
+  // null handle to vSemaphoreDelete() triggers a FreeRTOS assert (vQueueDelete: pxQueue).
+  if (g_SemaphoreCarData)
+  {
+    vSemaphoreDelete(g_SemaphoreCarData);
+    g_SemaphoreCarData = nullptr;
+  }
+
 #ifdef DEBUG
   Serial.flush();
 #endif
 
   // Go into deep sleep
   bInDeepSleep = true;
-  esp_sleep_enable_timer_wakeup(DeepSleepTime);
+  esp_sleep_enable_timer_wakeup(deepSleepTime);
   esp_deep_sleep_start();
 }
 
@@ -186,7 +202,7 @@ void CheckIfCarIsStillOn()
   if (!CarIgnitionOn())
   {
     DebugPrintln("CheckIfCarIsStillOn: Car is turned OFF, the ignition is off");
-    DeepSleep();
+    DeepSleep(LongDeepSleepTime);
   }
 
   timerWaitBeforeGoingIntoDeepSleep.Stop();

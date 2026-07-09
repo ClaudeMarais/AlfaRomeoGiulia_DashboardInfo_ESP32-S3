@@ -26,7 +26,7 @@ struct CarData
 
 // This data is shared between two ESP32-S3 cores
 CarData g_CurrentCarData { 0 };
-SemaphoreHandle_t g_SemaphoreCarData;
+SemaphoreHandle_t g_SemaphoreCarData = nullptr;
 TaskHandle_t g_TaskDisplayInfoOnDashboard = nullptr;
 
 // CAN IDs of CAN frames that are continously broadcasted which carries encoded information without the need to send an OBD2 request

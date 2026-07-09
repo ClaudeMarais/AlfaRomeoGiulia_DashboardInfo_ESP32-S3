@@ -35,6 +35,8 @@ enum InfoToDisplay
   infoTurboCooldownTimer,           // After a spirited drive, show a timer to cooldown the turbo before switching off the car
   infoWarningLowBattery,            // When car is idling, show warning when car battery is low
   infoWarningColdEngine,            // Don't drive too hard when engine is cold. This warning isn't for me, but for my son when he's driving my car :-)
+  infoWarningEngineTempTooHigh,     // Engine temp too high, check coolant. Danger above 120*C (248*F); normal cruise 90-105*C
+  infoWarningEngineOilTempTooHigh,  // Engine oil temp too high. Danger above 135*C (275*F); track oil is normally 115-130*C
   NumInfoMessages                   // Total number of info messages
 };
 
@@ -49,7 +51,7 @@ AsyncTimer timerToggleInfoWhileIdling(5000);          // Every 5 seconds toggle 
 uint8_t infoIndexWhileDriving = infoDrivingInfoWithEngineTemp;
 const uint8_t MaxInfoIndexWhileDriving = infoDrivingInfoWithBattery;
 
-// While idling, every 5 seconds toggle from [infoMaxBoost .. infoWarningColdEngine]
+// While idling, every 5 seconds toggle from [infoMaxBoost .. infoWarningEngineOilTempTooHigh]
 uint8_t infoIndexWhileIdling = infoMaxBoost;
 const uint8_t MinInfoIndexWhileIdling = infoMaxBoost;
 
@@ -244,14 +246,21 @@ void SetDashboardText(char* text)
     if (CAN.read(rxFrame) == CANController::IOResult::OK)
     {
       bool bNewFrameReceived = true;
-      uint8_t radioData[8];
+      uint8_t radioData[8] = { 0 };
       uint8_t numRadioFrames = -1;
       uint8_t currentRadioFrame = 0;
       uint8_t radioInfoCode = 0;
+      unsigned long radioWaitStart = millis();
+      const unsigned long radioWaitTimeout = 500; // Safety timeout to avoid infinite loop
 
       // Wait until we see the last radio frame and restart our custom frames
       while (currentRadioFrame < (numRadioFrames - 1))
       {
+        // Safety: break out if waiting too long for radio frames
+        if ((millis() - radioWaitStart) > radioWaitTimeout)
+        {
+          goto NoRadioFramesWereObserved;
+        }
         if (bNewFrameReceived)
         {
           // Let's do an extra check for the dashboard CAN ID, just in case something goes wrong with the hardware filter
@@ -330,15 +339,23 @@ void GenerateText(char* text)
     return;
   }
 
+  uint8_t maxInfoIndexWhileDriving = MaxInfoIndexWhileDriving;
+#ifdef SHOW_SQUADRA_MESSAGE
+  if (IsSquadraEnabled())
+  {
+    maxInfoIndexWhileDriving = infoDrivingInfoWithSquadra;
+  }
+#endif
+
   if (timerToggleInfoWhileDriving.RanOut())
   {
     timerToggleInfoWhileDriving.Start();
-
     infoIndexWhileDriving++;
-    if (infoIndexWhileDriving > MaxInfoIndexWhileDriving)
-    {
-      infoIndexWhileDriving = 0;
-    }
+  }
+
+  if (infoIndexWhileDriving > maxInfoIndexWhileDriving)
+  {
+    infoIndexWhileDriving = 0;
   }
 
   static bool bFoundActiveIdleMessage = false;
@@ -348,23 +365,20 @@ void GenerateText(char* text)
   char gearText[8] = { 0 };
 
   // Choose what info to show while driving
+  infoToDisplay = (InfoToDisplay)infoIndexWhileDriving;
 
-#ifdef SHOW_SQUADRA_MESSAGE
-  if (IsSquadraEnabled())
+  // Override other messages if warnings are present
+  if (IsEngineTempTooHigh())
   {
-    infoToDisplay = InfoToDisplay::infoDrivingInfoWithSquadra;
+    infoToDisplay = InfoToDisplay::infoWarningEngineTempTooHigh;
   }
-  else
-#endif
+  else if (IsEngineOilTempTooHigh())
   {
-    if (IsEngineColdAndHighRPM())
-    {
-      infoToDisplay = InfoToDisplay::infoWarningColdEngine;
-    }
-    else
-    {
-      infoToDisplay = (InfoToDisplay)infoIndexWhileDriving;
-    }
+    infoToDisplay = InfoToDisplay::infoWarningEngineOilTempTooHigh;
+  }
+  else if (IsEngineColdAndHighRPM())
+  {
+    infoToDisplay = InfoToDisplay::infoWarningColdEngine;
   }
 
   // Check to see if car is kind of idling and show "while idling" information
@@ -385,6 +399,16 @@ void GenerateText(char* text)
     if (IsEngineColdAndHighRPM())
     {
       bIsInfoActive[infoWarningColdEngine] = true;
+    }
+
+    if (IsEngineTempTooHigh())
+    {
+      bIsInfoActive[infoWarningEngineTempTooHigh] = true;
+    }
+
+    if (IsEngineOilTempTooHigh())
+    {
+      bIsInfoActive[infoWarningEngineOilTempTooHigh] = true;
     }
 
     if (IsTurboStillCoolingDown())
@@ -428,7 +452,10 @@ void GenerateText(char* text)
 
     if (timerWaitBeforeShowingInfoWhileIdle.RanOut())
     {
-      if (bFoundActiveIdleMessage)
+      // Keep a too-high engine/oil temp warning pinned even while idling, instead of letting it rotate with the other idle
+      // messages. Overheating often happens in slow traffic/idle (low airflow), so a real danger warning shouldn't flash away.
+      if (bFoundActiveIdleMessage &&
+          !IsEngineTempTooHigh() && !IsEngineOilTempTooHigh())
       {
         infoToDisplay = (InfoToDisplay)infoIndexWhileIdling;
       }
@@ -446,7 +473,7 @@ void GenerateText(char* text)
     {
       // Example:   " 23 psi   D1   Eng 200*F"
       GenerateGearText(carData.Gear, gearText); // Current gear
-      float farh = (carData.EngineTemp * 9.5f / 5.0f) + 32.0f;
+      float farh = (carData.EngineTemp * 9.0f / 5.0f) + 32.0f;
       sprintf(text, " %2d psi   %s   Eng %3d*F", int32_t(turboBoostPsi + 0.5f), gearText, int32_t(farh + 0.5f));
       break;
     }
@@ -455,7 +482,7 @@ void GenerateText(char* text)
     {
       // Example:   " 23 psi   D1   Oil 200*F"
       GenerateGearText(carData.Gear, gearText); // Current gear
-      float farh = (carData.EngineOilTemp * 9.5f / 5.0f) + 32.0f;
+      float farh = (carData.EngineOilTemp * 9.0f / 5.0f) + 32.0f;
       sprintf(text, " %2d psi   %s   Oil %3d*F", int32_t(turboBoostPsi + 0.5f), gearText, int32_t(farh + 0.5f));
       break;
     }
@@ -470,9 +497,9 @@ void GenerateText(char* text)
 
     case InfoToDisplay::infoDrivingInfoWithSquadra:
     { 
-      // Example:   " 23 psi   D1   Squadra  "
+      //  Example:  " 23 psi   D1  Squadra On"
       GenerateGearText(carData.Gear, gearText); // Current gear
-      sprintf(text, " %2d psi   %s   Squadra  ", int32_t(turboBoostPsi + 0.5f), gearText);
+      sprintf(text, " %2d psi   %s  Squadra On", int32_t(turboBoostPsi + 0.5f), gearText);
       break;
     }
 
@@ -480,8 +507,7 @@ void GenerateText(char* text)
     {
       // Example:   "Max 23 psi @ 5555 rpm D2"
       GenerateGearText(maxBoostGear, gearText); // Gear when max boost pressure was measured
-      sprintf(text, "Max %2d psi @ %4d rpm", int32_t(maxBoostPsi + 0.5f), maxBoostRPM);
-      sprintf(text, "%s %s", text, gearText);
+      sprintf(text, "Max %2d psi @ %4d rpm %s", int32_t(maxBoostPsi + 0.5f), maxBoostRPM, gearText);
       break;
     }
 
@@ -512,6 +538,22 @@ void GenerateText(char* text)
     case InfoToDisplay::infoWarningColdEngine:
     {
       sprintf(text, " Careful, engine is cold");
+      break;
+    }
+
+    case InfoToDisplay::infoWarningEngineTempTooHigh:
+    {
+      // Example:   " Eng temp too high 250*F"
+      float farh = (carData.EngineTemp * 9.0f / 5.0f) + 32.0f;
+      sprintf(text, " Eng temp too high %3d*F", int32_t(farh + 0.5f));
+      break;
+    }
+
+    case InfoToDisplay::infoWarningEngineOilTempTooHigh:
+    {
+      // Example:   " Oil temp too high 250*F"
+      float farh = (carData.EngineOilTemp * 9.0f / 5.0f) + 32.0f;
+      sprintf(text, " Oil temp too high %3d*F", int32_t(farh + 0.5f));
       break;
     }
   }
